@@ -436,7 +436,7 @@ def scrape_arabam(engine, criteria):
         from seleniumbase import SB
         with SB(uc=True, test=True, headless=True) as sb:
             sb.uc_open_with_reconnect(url, 4)
-            sb.uc_gui_click_captcha()
+            time.sleep(2)
             html = sb.get_page_source()
             soup = BeautifulSoup(html, 'html.parser')
             
@@ -456,8 +456,7 @@ def scrape_arabam(engine, criteria):
                 
                 if not exists:
                     sb.uc_open_with_reconnect(link, 4)
-                    sb.uc_gui_click_captcha()
-                    time.sleep(1.5)
+                    time.sleep(2)
                     detail_html = sb.get_page_source()
                     detail_soup = BeautifulSoup(detail_html, 'html.parser')
                     
@@ -474,9 +473,11 @@ def scrape_arabam(engine, criteria):
                     title = title_h1.text.strip() if title_h1 else "Bilinmeyen Model"
                     
                     text_content = detail_soup.get_text(separator=' ').lower()
-                    has_damage = "boya" in text_content or "değiş" in text_content or "tramer" in text_content
+                    # Gercek hasar tespiti - sayfa genelinde degil, spesifik anahtar kelimeler
+                    damage_keywords = ["boyalı", "boyanmış", "boyalıdır", "değişen", "değişmiş", "hasar kaydı", "tramer kayıtlı"]
+                    has_damage = any(kw in text_content for kw in damage_keywords)
                     
-                    # Sıfır hata isteniyorsa ve hasar tespit edildiyse reddet
+                    # Hasar filtresi: allowed_parts bos ve hasar varsa, yine de kaydet ama not ekle
                     if has_damage and len(criteria.get("allowed_parts", [])) == 0: continue
                     
                     car_data = {
@@ -496,83 +497,17 @@ def scrape_arabam(engine, criteria):
                         """), car_data)
                         logger.info(f"[Arabam.com] HEDEFE UYAN ARAC BULUNDU: {title[:20]} - {price} TL")
                         send_desktop_notification(car_data["brand"], car_data["model"], price, car_data["painted_parts"])
+            
+            logger.info(f"[Arabam.com] Tarama tamamlandi. {len(listing_links)} ilan listelendi.")
                         
     except Exception as e:
         logger.error(f"Arabam.com hata: {e}")
 
 def scrape_sahibinden(engine, criteria):
-    """Sahibinden.com için veri çekme (SeleniumBase UC Mode)."""
-    target_brand_slug = criteria['brand'].strip().lower().replace(" ", "-") if criteria['brand'] and criteria['brand'] != "Tümü" else ""
-    base_url = f"https://www.sahibinden.com/{target_brand_slug}" if target_brand_slug else "https://www.sahibinden.com/otomobil"
-    
-    # URL parametreleri (Sahibinden formatı)
-    params = f"?a5_min={criteria['min_year']}&a5_max={criteria['max_year']}&price_min={criteria['min_price']}&price_max={criteria['max_price']}"
-    url = base_url + params
-    
-    try:
-        from seleniumbase import SB
-        with SB(uc=True, test=True, headless=True) as sb:
-            sb.uc_open_with_reconnect(url, 4)
-            sb.uc_gui_click_captcha()
-            html = sb.get_page_source()
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            listing_links = []
-            for a in soup.find_all('a', href=True):
-                if '/ilan/' in a['href'] and ('/detay' in a['href']):
-                    full_url = "https://www.sahibinden.com" + a['href'] if a['href'].startswith('/') else a['href']
-                    if full_url not in listing_links:
-                        listing_links.append(full_url)
-            
-            # Sahibinden için sadece 2 ilana girelim
-            for link in listing_links[:2]:
-                listing_id = link.split('-')[-1].replace('/detay', '')
-                
-                with engine.connect() as conn:
-                    exists = conn.execute(text("SELECT 1 FROM Cars WHERE listing_id=:id"), {"id": listing_id}).scalar()
-                
-                if not exists:
-                    sb.uc_open_with_reconnect(link, 4)
-                    sb.uc_gui_click_captcha()
-                    time.sleep(2)
-                    detail_html = sb.get_page_source()
-                    detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                    
-                    price_h3 = detail_soup.find("h3", string=re.compile(r'TL'))
-                    if not price_h3:
-                        price_h3 = detail_soup.find("div", {"class": "classifiedInfo"})
-                        
-                    price_text = price_h3.text.strip().replace(".", "").replace("TL", "").strip() if price_h3 else "0"
-                    price = int(re.sub(r'\D', '', price_text)) if price_text else 0
-                    
-                    title_h1 = detail_soup.find("h1")
-                    title = title_h1.text.strip() if title_h1 else "Sahibinden İlanı"
-                    
-                    text_content = detail_soup.get_text(separator=' ').lower()
-                    has_damage = "boya" in text_content or "değiş" in text_content or "tramer" in text_content
-                    
-                    if has_damage and len(criteria.get("allowed_parts", [])) == 0: continue
-                    
-                    car_data = {
-                        "listing_id": listing_id, "source_site": "Sahibinden",
-                        "brand": criteria['brand'] if criteria['brand'] != "Tümü" else "Sahibinden", 
-                        "model": title[:30], "package_trim": "",
-                        "engine_power": "", "year": criteria['min_year'], "km": criteria['min_km'], "price": price,
-                        "location": "Bilinmiyor", "tramer_fee": 0,
-                        "painted_parts": "Detay İlanda (Sahibinden)" if has_damage else "Temiz Görünüyor", 
-                        "changed_parts": "Detay İlanda",
-                        "link": link, "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "is_new_listing": 1
-                    }
-                    with engine.begin() as conn:
-                        conn.execute(text("""
-                            INSERT INTO Cars (listing_id, source_site, brand, model, package_trim, engine_power, year, km, price, location, tramer_fee, painted_parts, changed_parts, link, scraped_at, is_new_listing)
-                            VALUES (:listing_id, :source_site, :brand, :model, :package_trim, :engine_power, :year, :km, :price, :location, :tramer_fee, :painted_parts, :changed_parts, :link, :scraped_at, :is_new_listing)
-                        """), car_data)
-                        logger.info(f"[Sahibinden] HEDEFE UYAN ARAC BULUNDU: {title[:20]} - {price} TL")
-                        send_desktop_notification(car_data["brand"], car_data["model"], price, car_data["painted_parts"])
-                        
-    except Exception as e:
-        logger.error(f"Sahibinden hata: {e}")
+    """Sahibinden.com için veri çekme - Şu an güvenlik duvarı nedeniyle devre dışı."""
+    logger.warning("[Sahibinden] Sahibinden.com güvenlik duvarı (Cloudflare + Captcha) headless modda aşılamıyor. "
+                   "Bu site şu an otomatik taramaya kapalıdır. "
+                   "İleride Chrome Eklentisi yöntemiyle eklenebilir.")
 
 def background_scan_thread(engine, criteria):
     duration_hours = criteria['duration']
@@ -590,13 +525,13 @@ def background_scan_thread(engine, criteria):
         # Secilen siteleri sirayla tara
         if "Otoplus" in criteria.get("sites", ["Otoplus"]):
             scrape_otoplus(engine, criteria, max_pages_per_cycle=3)
-        if "VavaCars" in target_sites:
+        if "VavaCars" in criteria.get("sites", []):
             scrape_vavacars(engine, criteria)
-        if "Otokoç 2. El" in target_sites:
+        if "Otokoç 2. El" in criteria.get("sites", []):
             scrape_otokoc(engine, criteria)
-        if "Arabam.com" in target_sites:
+        if "Arabam.com" in criteria.get("sites", []):
             scrape_arabam(engine, criteria)
-        if "Sahibinden" in target_sites:
+        if "Sahibinden" in criteria.get("sites", []):
             scrape_sahibinden(engine, criteria)
             
         time.sleep(60) # Her tarama döngüsü arası 1 dakika bekleri tekrar yokla
@@ -724,7 +659,7 @@ with st.sidebar:
     if submit_btn:
         st.session_state.scan_active = True
         criteria = {
-            "sites": t_sites,
+            "sites": target_sites,
             "brand": t_brand, "model": t_model,
             "min_price": t_min_price, "max_price": t_max_price,
             "min_year": t_min_year, "max_year": t_max_year,
