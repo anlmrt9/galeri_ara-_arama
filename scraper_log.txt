@@ -1,0 +1,20 @@
+[2026-08-06 11:10:30] INFO: Flask: Scraper arka planda baslatiliyor...
+[2026-08-06 11:10:30] INFO: Veritabani tablolari hazir.
+[2026-08-06 11:10:30] INFO: Tarama baslatiliyor...
+[2026-08-06 11:12:10] WARNING: Sayfa 1 proxyler ile acilamadi.
+[2026-08-06 11:13:50] WARNING: Sayfa 2 proxyler ile acilamadi.
+[2026-08-06 11:15:30] WARNING: Sayfa 3 proxyler ile acilamadi.
+[2026-08-06 11:17:11] WARNING: Sayfa 4 proxyler ile acilamadi.
+[2026-08-06 11:18:51] WARNING: Sayfa 5 proxyler ile acilamadi.
+[2026-08-06 11:18:51] WARNING: Islem tamamlanamadi veya liste bos.
+[2026-08-06 13:19:37] INFO: Veritabani tablolari hazir.
+[2026-08-06 13:19:37] INFO: Tarama baslatiliyor...
+[2026-08-06 13:21:17] WARNING: Sayfa 1 proxyler ile acilamadi.
+[2026-08-06 13:22:58] WARNING: Sayfa 2 proxyler ile acilamadi.
+[2026-08-06 13:24:38] WARNING: Sayfa 3 proxyler ile acilamadi.
+[2026-08-06 13:26:18] WARNING: Sayfa 4 proxyler ile acilamadi.
+[2026-08-06 13:27:58] WARNING: Sayfa 5 proxyler ile acilamadi.
+[2026-08-06 13:27:58] WARNING: Islem tamamlanamadi veya liste bos.
+[2026-08-06 16:14:35] INFO: Veritabani tablolari hazir.
+[2026-08-06 16:14:35] INFO: Tarama baslatiliyor...
+[2026-08-06 16:16:15] WARNING: Sayfa 1 proxyler ile acilamadi.

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Award-Winning Creative Agency</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;1,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Background Drifting Orbs -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <!-- Main Content Layer -->
+    <div class="content-wrapper">
+        <!-- Navigation -->
+        <nav class="navbar">
+            <div class="logo">AGENCY</div>
+            <div class="nav-links">
+                <a href="#">WORK</a>
+                <a href="#">STUDIO</a>
+                <a href="#">SERVICES</a>
+                <a href="http://localhost:8501" target="_blank">DASHBOARD</a>
+                <a href="#">CONTACT</a>
+            </div>
+        </nav>
+
+        <!-- Hero Section -->
+        <main class="hero">
+            <p class="eyebrow">DIGITAL EXCELLENCE</p>
+            <h1 class="headline">We build immersive <br> digital <em>experiences</em></h1>
+            <p class="sub-headline">Merging strategic design with cutting-edge engineering to create<br>award-winning interactive platforms for forward-thinking brands.</p>
+            
+            <div class="pill-buttons">
+                <a href="http://localhost:8501" target="_blank" class="pill-btn primary">📊 Dashboard'a Git</a>
+                <a href="#" class="pill-btn">Our Approach</a>
+            </div>
+        </main>
+
+        <!-- Marquee Strip -->
+        <div class="marquee-strip">
+            <div class="marquee-content">
+                BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot; BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot;
+            </div>
+            <!-- Duplicate for seamless looping -->
+            <div class="marquee-content">
+                BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot; BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot;
+            </div>
+        </div>
+
+        <!-- Video Placeholder -->
+        <div class="video-container">
+            <div class="cinematic-sweep"></div>
+            <div class="video-overlay"></div>
+            <div class="play-button-wrapper">
+                <div class="play-button">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="rgba(255,255,255,0.85)"><path d="M8 5v14l11-7z"/></svg>
+                </div>
+                <div class="showreel-label">SHOWREEL 2025</div>
+            </div>
+        </div>
+
+        <!-- Stats Bar -->
+        <div class="stats-row">
+            <div class="stat-col">
+                <div class="stat-number">{{ total_vehicles if total_vehicles else '0' }}</div>
+                <div class="stat-label">Vehicles Scraped</div>
+            </div>
+            <div class="stat-col">
+                <div class="stat-number">38</div>
+                <div class="stat-label">Awards Won</div>
+            </div>
+            <div class="stat-col">
+                <div class="stat-number">12</div>
+                <div class="stat-label">Years Active</div>
+            </div>
+            <div class="stat-col">
+                <div class="stat-number">6</div>
+                <div class="stat-label">Continents</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
