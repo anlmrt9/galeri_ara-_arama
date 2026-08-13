@@ -264,87 +264,102 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3):
         time.sleep(2)
 
 def scrape_vavacars(engine, criteria):
-    """VavaCars için veri çekme."""
-    base_url = "https://app-vava-dtc-search-tr-prod.vava.cars/search/filter-preview"
-    headers = {
-        'accept': 'application/json, text/plain, */*',
-        'content-type': 'application/json',
-        'origin': 'https://tr.vava.cars',
-        'referer': 'https://tr.vava.cars/',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    """VavaCars için veri çekme (SeleniumBase UC Mode)."""
+    target_brand = criteria['brand'].strip() if criteria['brand'] and criteria['brand'] != "Tümü" else ""
+    base_url = f"https://tr.vava.cars/buy/cars/{target_brand}" if target_brand else "https://tr.vava.cars/buy/cars"
     
-    # Basit bir payload
-    payload = {
-        "transmission": [], "fuelType": [], "driveType": [], "bodyType": [],
-        "doorCount": [], "seatingCapacity": [], "carFeaturesCodes": [], "color": [],
-        "colorCode": [], "locationCity": [], "tags": [], "hideBooked": True, "anyBooked": False
-    }
-    
-    session = cf.Session()
     try:
-        r = session.post(base_url, headers=headers, json=payload, impersonate="chrome120", timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            items = data.get("items", [])
-            for item in items:
-                brand = item.get("make", "")
-                model = item.get("model", "")
-                price = int(item.get("price", 0))
-                year = int(item.get("year", 0))
-                km = int(item.get("mileage", 0))
-                trim = item.get("trimLevel", "")
-                is_damaged = item.get("isDamaged", False)
-                is_repainted = item.get("isRepainted", False)
-                is_replaced = item.get("isReplaced", False)
+        from seleniumbase import SB
+        with SB(uc=True, test=True, headless=True) as sb:
+            sb.uc_open_with_reconnect(base_url, 4)
+            time.sleep(5)
+            html = sb.get_page_source()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Tüm ilan linklerini (a etiketlerini) bul
+            car_links = soup.find_all('a', href=True)
+            valid_cards = []
+            
+            for a in car_links:
+                href = a['href']
+                if '/buy/cars/' in href and len(href.split('/')) >= 4:
+                    if a not in valid_cards:
+                        valid_cards.append(a)
+            
+            new_cars_found = 0
+            for a_tag in valid_cards:
+                href = a_tag['href']
+                listing_id = href.split('/')[-1]
+                full_link = "https://tr.vava.cars" + href if href.startswith('/') else href
                 
-                # 1. Aşama Filtreler
-                if criteria['brand'] and criteria['brand'] != "Tümü" and criteria['brand'].lower() not in brand.lower(): continue
-                if criteria['model'] and criteria['model'] != "Tümü" and criteria['model'].lower() not in model.lower(): continue
+                with engine.connect() as conn:
+                    exists = conn.execute(text("SELECT 1 FROM Cars WHERE listing_id=:id"), {"id": listing_id}).scalar()
+                
+                if exists:
+                    continue # Zaten var, sonrakine gec
+                    
+                new_cars_found += 1
+                if new_cars_found > 5:
+                    break # Sadece ilk 5 yeni araci isle (bot yakalanmamasi icin)
+                
+                # HTML'den verileri ayikla
+                title_div = a_tag.find("div", class_=lambda c: c and "text-xl" in c)
+                title = title_div.text.strip() if title_div else "Bilinmeyen"
+                
+                package_div = a_tag.find("div", class_=lambda c: c and "text-base" in c)
+                package = package_div.text.strip() if package_div else ""
+                
+                tags_divs = a_tag.find_all("div", class_=lambda c: c and "text-sm" in c)
+                tags = [t.text.strip() for t in tags_divs]
+                year = int(tags[0]) if len(tags) > 0 and tags[0].isdigit() else 0
+                km_text = tags[1] if len(tags) > 1 else "0"
+                km = int(re.sub(r'\D', '', km_text)) if km_text else 0
+                
+                price_div = a_tag.find("div", class_=lambda c: c and "text-h3" in c)
+                price_text = price_div.text.strip() if price_div else "0"
+                price = int(re.sub(r'\D', '', price_text)) if price_text else 0
+                
+                badge = a_tag.find("span", class_=lambda c: c and "font-semibold" in c)
+                damage_info = badge.text.strip() if badge else "Hasar Bilgisi Yok"
+                
+                # Model kelimesini title'dan cikarmayi deneyelim (örn: Volkswagen Taigo -> marka: Volkswagen, model: Taigo)
+                brand_str = target_brand if target_brand else title.split(' ')[0]
+                model_str = title.replace(brand_str, '').strip() if brand_str in title else title
+                
+                # Filtreler
                 if price < criteria['min_price'] or price > criteria['max_price']: continue
                 if year < criteria['min_year'] or year > criteria['max_year']: continue
                 if km < criteria['min_km'] or km > criteria['max_km']: continue
+                if criteria['model'] and criteria['model'] != "Tümü" and criteria['model'].lower() not in model_str.lower(): continue
                 
-                # 2. Aşama Filtreler (Hasar)
-                allowed_parts = criteria.get("allowed_parts", [])
-                has_any_damage = is_damaged or is_repainted or is_replaced
+                # Hasar filtreleri
+                has_damage = "boyasız, değişensiz" not in damage_info.lower() and damage_info != "Orijinal / Hatasız"
+                if has_damage and len(criteria.get("allowed_parts", [])) == 0:
+                    logger.info(f"[VavaCars] SKIP - Hasar filtresine takildi: {title}")
+                    continue
                 
-                if has_any_damage:
-                    # Kullanıcı SIFIR boya istiyorsa (liste boşsa), reddet
-                    if len(allowed_parts) == 0: continue
-                    # Kullanıcı bazı parçaları işaretlemediyse (liste < 11), VavaCars net hasar bölgesi vermediği için güvenli tarafta kalıp REDDEDELİM.
-                    # Veya sadece kullanıcının tüm hasarları kabul ettiği durumda (liste == 11) kabul edelim.
-                    if len(allowed_parts) < 11: continue
-                
-                painted_parts = "Hasarlı/Boyalı (Detay VavaCars'ta)" if has_any_damage else "Orijinal / Hatasız"
-                
-                car_id = item.get("id", "")
-                make_slug = brand.lower()
-                model_slug = model.lower().replace(" ", "-")
-                link = f"https://tr.vava.cars/buy/cars/{make_slug}/{model_slug}/{car_id}"
-                
-                with engine.connect() as conn:
-                    exists = conn.execute(text("SELECT 1 FROM Cars WHERE listing_id=:id"), {"id": car_id}).scalar()
-                    
-                if not exists:
-                    car_data = {
-                        "listing_id": car_id, "source_site": "VavaCars",
-                        "brand": brand, "model": model, "package_trim": trim,
-                        "engine_power": "", "year": year, "km": km, "price": price,
-                        "location": item.get("locationCity", ""), "tramer_fee": 0,
-                        "painted_parts": painted_parts, "changed_parts": "Detay VavaCars'ta" if has_any_damage else "Orijinal",
-                        "link": link, "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "is_new_listing": 1
-                    }
-                    with engine.begin() as conn:
-                        conn.execute(text("""
-                            INSERT INTO Cars (listing_id, source_site, brand, model, package_trim, engine_power, year, km, price, location, tramer_fee, painted_parts, changed_parts, link, scraped_at, is_new_listing)
-                            VALUES (:listing_id, :source_site, :brand, :model, :package_trim, :engine_power, :year, :km, :price, :location, :tramer_fee, :painted_parts, :changed_parts, :link, :scraped_at, :is_new_listing)
-                        """), car_data)
-                        logger.info(f"[VavaCars] HEDEFE UYAN ARAC BULUNDU: {brand} - {price} TL")
-                        send_desktop_notification(brand, model, price, painted_parts)
+                car_data = {
+                    "listing_id": listing_id, "source_site": "VavaCars",
+                    "brand": brand_str, "model": model_str, "package_trim": package,
+                    "engine_power": "", "year": year, "km": km, "price": price,
+                    "location": "Bilinmiyor", "tramer_fee": 0,
+                    "painted_parts": damage_info, 
+                    "changed_parts": "Detay İlanda",
+                    "link": full_link, "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "is_new_listing": 1
+                }
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO Cars (listing_id, source_site, brand, model, package_trim, engine_power, year, km, price, location, tramer_fee, painted_parts, changed_parts, link, scraped_at, is_new_listing)
+                        VALUES (:listing_id, :source_site, :brand, :model, :package_trim, :engine_power, :year, :km, :price, :location, :tramer_fee, :painted_parts, :changed_parts, :link, :scraped_at, :is_new_listing)
+                    """), car_data)
+                    logger.info(f"[VavaCars] HEDEFE UYAN ARAC BULUNDU: {title} - {price} TL")
+                    send_desktop_notification(brand_str, model_str, price, damage_info)
+            
+            logger.info(f"[VavaCars] Tarama tamamlandi. Yeni islenen ilan: {new_cars_found}")
                         
     except Exception as e:
         logger.error(f"VavaCars hata: {e}")
+
 
 def scrape_otokoc(engine, criteria):
     """Otokoç 2. El için veri çekme."""
