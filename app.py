@@ -447,18 +447,22 @@ def scrape_arabam(engine, criteria):
                     if full_url not in listing_links:
                         listing_links.append(full_url)
             
-            # Sadece 3 ilanı gezelim ki bot yakalanmasın
-            for link in listing_links[:3]:
+            new_links = []
+            for link in listing_links:
                 listing_id = link.split('/')[-1]
-                
                 with engine.connect() as conn:
                     exists = conn.execute(text("SELECT 1 FROM Cars WHERE listing_id=:id"), {"id": listing_id}).scalar()
-                
                 if not exists:
-                    sb.uc_open_with_reconnect(link, 4)
-                    time.sleep(2)
-                    detail_html = sb.get_page_source()
-                    detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                    new_links.append((listing_id, link))
+                if len(new_links) >= 3:
+                    break
+            
+            # Bulunan ilk 3 YENI ilani gez
+            for listing_id, link in new_links:
+                sb.uc_open_with_reconnect(link, 4)
+                time.sleep(2)
+                detail_html = sb.get_page_source()
+                detail_soup = BeautifulSoup(detail_html, 'html.parser')
                     
                     price_div = detail_soup.find("div", {"class": "product-price"})
                     if not price_div:
@@ -477,8 +481,10 @@ def scrape_arabam(engine, criteria):
                     damage_keywords = ["boyalı", "boyanmış", "boyalıdır", "değişen", "değişmiş", "hasar kaydı", "tramer kayıtlı"]
                     has_damage = any(kw in text_content for kw in damage_keywords)
                     
-                    # Hasar filtresi: allowed_parts bos ve hasar varsa, yine de kaydet ama not ekle
-                    if has_damage and len(criteria.get("allowed_parts", [])) == 0: continue
+                    # Hasar filtresi: allowed_parts bos ve hasar varsa reddet, ama nedenini logla
+                    if has_damage and len(criteria.get("allowed_parts", [])) == 0:
+                        logger.info(f"[Arabam.com] SKIP - Hasar filtresine takildi: {title[:20]}")
+                        continue
                     
                     car_data = {
                         "listing_id": listing_id, "source_site": "Arabam.com",
