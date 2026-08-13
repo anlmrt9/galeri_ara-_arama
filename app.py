@@ -464,45 +464,45 @@ def scrape_arabam(engine, criteria):
                 detail_html = sb.get_page_source()
                 detail_soup = BeautifulSoup(detail_html, 'html.parser')
                     
-                    price_div = detail_soup.find("div", {"class": "product-price"})
-                    if not price_div:
-                        price_div = detail_soup.find("span", {"class": "color-red4"})
-                    
-                    price_text = price_div.text.strip().replace(".", "").replace("TL", "").strip() if price_div else "0"
-                    price = int(re.sub(r'\D', '', price_text)) if price_text else 0
-                    
-                    if price < criteria['min_price'] or price > criteria['max_price']: continue
-                    
-                    title_h1 = detail_soup.find("h1")
-                    title = title_h1.text.strip() if title_h1 else "Bilinmeyen Model"
-                    
-                    text_content = detail_soup.get_text(separator=' ').lower()
-                    # Gercek hasar tespiti - sayfa genelinde degil, spesifik anahtar kelimeler
-                    damage_keywords = ["boyalı", "boyanmış", "boyalıdır", "değişen", "değişmiş", "hasar kaydı", "tramer kayıtlı"]
-                    has_damage = any(kw in text_content for kw in damage_keywords)
-                    
-                    # Hasar filtresi: allowed_parts bos ve hasar varsa reddet, ama nedenini logla
-                    if has_damage and len(criteria.get("allowed_parts", [])) == 0:
-                        logger.info(f"[Arabam.com] SKIP - Hasar filtresine takildi: {title[:20]}")
-                        continue
-                    
-                    car_data = {
-                        "listing_id": listing_id, "source_site": "Arabam.com",
-                        "brand": criteria['brand'] if criteria['brand'] != "Tümü" else "Arabam", 
-                        "model": title[:30], "package_trim": "",
-                        "engine_power": "", "year": criteria['min_year'], "km": criteria['min_km'], "price": price,
-                        "location": "Bilinmiyor", "tramer_fee": 0,
-                        "painted_parts": "Detay İlanda (Arabam)" if has_damage else "Temiz Görünüyor", 
-                        "changed_parts": "Detay İlanda",
-                        "link": link, "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "is_new_listing": 1
-                    }
-                    with engine.begin() as conn:
-                        conn.execute(text("""
-                            INSERT INTO Cars (listing_id, source_site, brand, model, package_trim, engine_power, year, km, price, location, tramer_fee, painted_parts, changed_parts, link, scraped_at, is_new_listing)
-                            VALUES (:listing_id, :source_site, :brand, :model, :package_trim, :engine_power, :year, :km, :price, :location, :tramer_fee, :painted_parts, :changed_parts, :link, :scraped_at, :is_new_listing)
-                        """), car_data)
-                        logger.info(f"[Arabam.com] HEDEFE UYAN ARAC BULUNDU: {title[:20]} - {price} TL")
-                        send_desktop_notification(car_data["brand"], car_data["model"], price, car_data["painted_parts"])
+                price_div = detail_soup.find("div", {"class": "product-price"})
+                if not price_div:
+                    price_div = detail_soup.find("span", {"class": "color-red4"})
+                
+                price_text = price_div.text.strip().replace(".", "").replace("TL", "").strip() if price_div else "0"
+                price = int(re.sub(r'\D', '', price_text)) if price_text else 0
+                
+                if price < criteria['min_price'] or price > criteria['max_price']: continue
+                
+                title_h1 = detail_soup.find("h1")
+                title = title_h1.text.strip() if title_h1 else "Bilinmeyen Model"
+                
+                text_content = detail_soup.get_text(separator=' ').lower()
+                # Gercek hasar tespiti - sayfa genelinde degil, spesifik anahtar kelimeler
+                damage_keywords = ["boyalı", "boyanmış", "boyalıdır", "değişen", "değişmiş", "hasar kaydı", "tramer kayıtlı"]
+                has_damage = any(kw in text_content for kw in damage_keywords)
+                
+                # Hasar filtresi: allowed_parts bos ve hasar varsa reddet, ama nedenini logla
+                if has_damage and len(criteria.get("allowed_parts", [])) == 0:
+                    logger.info(f"[Arabam.com] SKIP - Hasar filtresine takildi: {title[:20]}")
+                    continue
+                
+                car_data = {
+                    "listing_id": listing_id, "source_site": "Arabam.com",
+                    "brand": criteria['brand'] if criteria['brand'] != "Tümü" else "Arabam", 
+                    "model": title[:30], "package_trim": "",
+                    "engine_power": "", "year": criteria['min_year'], "km": criteria['min_km'], "price": price,
+                    "location": "Bilinmiyor", "tramer_fee": 0,
+                    "painted_parts": "Detay İlanda (Arabam)" if has_damage else "Temiz Görünüyor", 
+                    "changed_parts": "Detay İlanda",
+                    "link": link, "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "is_new_listing": 1
+                }
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO Cars (listing_id, source_site, brand, model, package_trim, engine_power, year, km, price, location, tramer_fee, painted_parts, changed_parts, link, scraped_at, is_new_listing)
+                        VALUES (:listing_id, :source_site, :brand, :model, :package_trim, :engine_power, :year, :km, :price, :location, :tramer_fee, :painted_parts, :changed_parts, :link, :scraped_at, :is_new_listing)
+                    """), car_data)
+                    logger.info(f"[Arabam.com] HEDEFE UYAN ARAC BULUNDU: {title[:20]} - {price} TL")
+                    send_desktop_notification(car_data["brand"], car_data["model"], price, car_data["painted_parts"])
             
             logger.info(f"[Arabam.com] Tarama tamamlandi. {len(listing_links)} ilan listelendi.")
                         
