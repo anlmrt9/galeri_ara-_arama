@@ -96,39 +96,6 @@ st.markdown("""
         max-width: 600px;
     }
     
-    /* Monospace Code Terminal styled on the right */
-    .code-panel {
-        background-color: #0d1117;
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
-        font-family: 'Fira Code', 'Courier New', monospace;
-        color: #c9d1d9;
-        font-size: 14px;
-        border: 1px solid #21262d;
-    }
-    
-    .code-tabs {
-        display: flex;
-        gap: 12px;
-        margin-bottom: 12px;
-        border-bottom: 1px solid #21262d;
-        padding-bottom: 8px;
-        font-size: 13px;
-    }
-    
-    .code-tab-active {
-        color: #58a6ff;
-        font-weight: 600;
-        border-bottom: 2px solid #58a6ff;
-        padding-bottom: 8px;
-    }
-    
-    .code-tab-inactive {
-        color: #8b949e;
-        padding-bottom: 8px;
-    }
-    
     /* Feature cards styles */
     .feature-card {
         background-color: #ffffff;
@@ -270,41 +237,24 @@ if "stop_event" not in st.session_state:
 
 # Code terminal values based on active state
 if st.session_state.scan_active:
-    status_comment = "// Scan Status: SUCCESS - Active sourcing running..."
-    status_color = "#7ee787"
+    status_comment = "Aktif Tarama Sürüyor... Arkanıza yaslanın, gerisini bize bırakın."
+    status_color = "#00a35c"
 else:
-    status_comment = "// Scan Status: IDLE - Sourcing engine is ready."
-    status_color = "#8b949e"
+    status_comment = "Sistem Aramaya Hazır. Lütfen hedeflerinizi belirleyin."
+    status_color = "#687076"
 
 # We split the page layout dynamically inside the custom gradient band
 st.markdown(f"""
-<div class="hero-container">
-    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 3rem;">
-        <div style="flex: 1; min-width: 320px;">
-            <div class="hero-headline">OtoGaleri Sourcing Infrastructure.</div>
-            <div class="hero-body">
-                A high-speed automotive sourcing infrastructure matching customized criteria. 
-                Monitors digital inventories across Otoplus, VavaCars, Otokoç, and Arabam automatically.
-            </div>
+<div class="hero-container" style="text-align: center; padding: 6rem 10% 5rem 10%;">
+    <div style="max-width: 800px; margin: 0 auto;">
+        <div class="hero-headline" style="font-size: 56px;">Akıllı Araç Tedarik Altyapısı.</div>
+        <div class="hero-body" style="margin: 0 auto 2rem auto; font-size: 20px;">
+            Sizin belirlediğiniz kriterlere göre piyasadaki en uygun araçları tespit eder. 
+            Otoplus, VavaCars, Otokoç ve Arabam.com stoklarını saniyeler içinde tarar, 
+            yeni bir araç eklendiği an dikkatinizi dağıtmadan size bildirir.
         </div>
-        <div style="flex: 1; min-width: 320px; max-width: 500px;">
-            <div class="code-panel">
-                <div class="code-tabs">
-                    <span class="code-tab-active">config.yaml</span>
-                    <span class="code-tab-inactive">api_response.json</span>
-                </div>
-                <div style="line-height: 1.6;">
-                    <span style="color: #ff7b72;">engine</span>: <span style="color: #a5d6ff;">"OtoGaleriAvci"</span><br>
-                    <span style="color: #ff7b72;">monitoring_channels</span>:<br>
-                    &nbsp;&nbsp;- <span style="color: #a5d6ff;">"Otoplus"</span><br>
-                    &nbsp;&nbsp;- <span style="color: #a5d6ff;">"VavaCars"</span><br>
-                    &nbsp;&nbsp;- <span style="color: #a5d6ff;">"Otokoç 2. El"</span><br>
-                    &nbsp;&nbsp;- <span style="color: #a5d6ff;">"Arabam.com"</span><br>
-                    <span style="color: #ff7b72;">notification_alerts</span>: <span style="color: #79c0ff;">true</span><br>
-                    <br>
-                    <span style="color: {status_color}; font-weight: 500;">{status_comment}</span>
-                </div>
-            </div>
+        <div style="display: inline-block; padding: 8px 20px; background-color: rgba(255,255,255,0.7); border-radius: 50px; font-weight: 600; font-size: 15px; color: {status_color}; border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
+            <span style="margin-right: 8px;">🎯</span> {status_comment}
         </div>
     </div>
 </div>
@@ -322,8 +272,8 @@ with col1:
     st.markdown("""
     <div class="feature-card">
         <div class="feature-icon-tile" style="background: linear-gradient(135deg, #a0c4ff, #c8b6ff);">🔄</div>
-        <div class="feature-title">Unified Sourcing</div>
-        <div class="feature-text">Aggregates multi-platform listings into a unified real-time stream.</div>
+        <div class="feature-title">Eşzamanlı Tarama</div>
+        <div class="feature-text">Tüm platformları tek bir akışta birleştirerek anlık veri sağlar.</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -331,8 +281,8 @@ with col2:
     st.markdown("""
     <div class="feature-card">
         <div class="feature-icon-tile" style="background: linear-gradient(135deg, #bdf0e0, #a0c4ff);">📈</div>
-        <div class="feature-title">Real-Time Routing</div>
-        <div class="feature-text">Applies multi-threaded crawlers to route matching units directly.</div>
+        <div class="feature-title">Hızlı Bildirim</div>
+        <div class="feature-text">Kriterlerinize uyan bir araç ilana düştüğü an masaüstü bildirimi alırsınız.</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -340,17 +290,17 @@ with col3:
     st.markdown("""
     <div class="feature-card">
         <div class="feature-icon-tile" style="background: linear-gradient(135deg, #c8b6ff, #fffdd0);">🛡️</div>
-        <div class="feature-title">Damage Evaluation</div>
-        <div class="feature-text">Advanced filters isolate and exclude specific structural repaint and repair details.</div>
+        <div class="feature-title">Hasar Koruması</div>
+        <div class="feature-text">Gelişmiş NLP filtresi ile istemediğiniz boya veya değişenleri otomatik eler.</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col4:
     st.markdown("""
     <div class="feature-card">
-        <div class="feature-icon-tile" style="background: linear-gradient(135deg, #fffdd0, #bdf0e0);">🔔</div>
-        <div class="feature-title">Instant Alerts</div>
-        <div class="feature-text">Pushes immediate desktop toast notifications whenever matches are discovered.</div>
+        <div class="feature-icon-tile" style="background: linear-gradient(135deg, #fffdd0, #bdf0e0);">🧠</div>
+        <div class="feature-title">Psikolojik Rahatlık</div>
+        <div class="feature-text">Siz işininize odaklanın, manuel ilan arama stresini bot devralsın.</div>
     </div>
     """, unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
