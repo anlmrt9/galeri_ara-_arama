@@ -328,7 +328,7 @@ st.markdown("""
 st.markdown('<div class="parameter-card">', unsafe_allow_html=True)
 
 # Form header
-st.markdown('<div class="parameter-header">🎯 Target Specifications</div>', unsafe_allow_html=True)
+st.markdown('<div class="parameter-header">🎯 Hedef Araç Özellikleri</div>', unsafe_allow_html=True)
 
 CAR_CATALOG = {
     "Audi": ["A3", "A4", "A5", "A6", "Q2", "Q3", "Q5", "Q7"],
@@ -354,40 +354,40 @@ CAR_CATALOG = {
 grid_col1, grid_col2 = st.columns(2)
 
 with grid_col1:
-    t_brand = st.selectbox("Brand Name", ["Tümü"] + sorted(list(CAR_CATALOG.keys())))
+    t_brand = st.selectbox("Marka Seçin", ["Tümü"] + sorted(list(CAR_CATALOG.keys())))
 with grid_col2:
     if t_brand == "Tümü":
-        t_model = st.selectbox("Model Name", ["Tümü"])
+        t_model = st.selectbox("Model Seçin", ["Tümü"])
     else:
-        t_model = st.selectbox("Model Name", ["Tümü"] + sorted(CAR_CATALOG[t_brand]))
+        t_model = st.selectbox("Model Seçin", ["Tümü"] + sorted(CAR_CATALOG[t_brand]))
 
 p_col1, p_col2, p_col3 = st.columns(3)
 with p_col1:
-    t_min_price = st.number_input("Min Price (TRY)", value=0, step=50000)
-    t_max_price = st.number_input("Max Price (TRY)", value=999999999, step=50000)
+    t_min_price = st.number_input("Minimum Fiyat (TL)", value=0, step=50000)
+    t_max_price = st.number_input("Maksimum Fiyat (TL)", value=999999999, step=50000)
 with p_col2:
-    t_min_year = st.number_input("Min Year", value=1970, step=1)
-    t_max_year = st.number_input("Max Year", value=2030, step=1)
+    t_min_year = st.number_input("Minimum Yıl", value=1970, step=1)
+    t_max_year = st.number_input("Maksimum Yıl", value=2030, step=1)
 with p_col3:
-    t_min_km = st.number_input("Min Mileage (KM)", value=0, step=10000)
-    t_max_km = st.number_input("Max Mileage (KM)", value=1000000, step=10000)
+    t_min_km = st.number_input("Minimum Kilometre (KM)", value=0, step=10000)
+    t_max_km = st.number_input("Maksimum Kilometre (KM)", value=1000000, step=10000)
 
 p_col4, p_col5 = st.columns(2)
 with p_col4:
-    t_max_tramer = st.number_input("Maximum Accepted Tramer (TRY)", value=999999999, step=5000)
+    t_max_tramer = st.number_input("Maksimum Kabul Edilen Tramer (TL)", value=999999999, step=5000)
 with p_col5:
-    t_duration = st.number_input("Sourcing Session Duration (Hours)", value=1.0, step=0.5)
+    t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=1.0, step=0.5)
 
 st.markdown("<br>", unsafe_allow_html=True)
 target_sites = st.multiselect(
-    "Target Channels / Sites",
+    "Hedef Kanallar / Siteler",
     ALL_SITES,
     default=ALL_SITES
 )
 
 # Allowed damages config
-st.markdown("<br><b>🚘 Allowable Repairs (Boya/Değişen)</b>", unsafe_allow_html=True)
-st.markdown("<p style='font-size: 13px; color: #687076;'>Select parts you are comfortable having repairs on. Unchecked areas with damage will reject the listing.</p>", unsafe_allow_html=True)
+st.markdown("<br><b>🚘 Kabul Edilebilir Onarımlar (Boya/Değişen)</b>", unsafe_allow_html=True)
+st.markdown("<p style='font-size: 13px; color: #687076;'>Boya veya değişen olmasına göz yumabileceğiniz parçaları işaretleyin. İşaretlenmeyen parçalarda hasar çıkarsa araç sistem tarafından filtrelenir ve karşınıza getirilmez.</p>", unsafe_allow_html=True)
 
 dmg_col1, dmg_col2, dmg_col3 = st.columns(3)
 
@@ -429,12 +429,12 @@ act_col1, act_col2 = st.columns(2)
 with act_col1:
     # We place submit inside a custom class container for primary button style
     st.markdown('<div class="primary-btn">', unsafe_allow_html=True)
-    submit_btn = st.button("🚀 Start Sourcing Stream", use_container_width=True)
+    submit_btn = st.button("🚀 Tarama ve Tedarik Sürecini Başlat", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with act_col2:
     if st.session_state.scan_active:
-        stop_btn = st.button("🛑 Terminate Sourcing Session", use_container_width=True)
+        stop_btn = st.button("🛑 Tarama Oturumunu Sonlandır", use_container_width=True)
         if stop_btn:
             st.session_state.scan_active = False
             if st.session_state.stop_event:
@@ -475,14 +475,14 @@ st.markdown('</div>', unsafe_allow_html=True) # End parameter-card
 
 st.markdown('<div style="margin: 3rem 10% 0 10%;">', unsafe_allow_html=True)
 
-st.markdown('<h3>📊 Discovered Vehicles</h3>', unsafe_allow_html=True)
+st.markdown('<h3>📊 Bulunan Araçlar</h3>', unsafe_allow_html=True)
 
 df = load_data(engine)
 
 if not df.empty:
     new_listings = df[df["is_new_listing"] == 1]
     if not new_listings.empty:
-        st.markdown(f"#### 🚨 NEW MATCHES ({len(new_listings)} items)")
+        st.markdown(f"#### 🚨 YENİ YAKALANAN ARAÇLAR ({len(new_listings)} ilan)")
         for idx, row in new_listings.iterrows():
             badge_color = (
                 "#ff4b4b" if row['source_site'] == "Otoplus"
@@ -496,12 +496,12 @@ if not df.empty:
                 <br>
                 <small style="color: #687076;">Boya: {row['painted_parts']} | Değişen: {row['changed_parts']} | Tramer: {row['tramer_fee']} ₺</small>
                 <br>
-                <a href="{row['link']}" target="_blank" style="color:#0091ff; font-size:12px; font-weight: 500;">Go to Listing ↗</a>
+                <a href="{row['link']}" target="_blank" style="color:#0091ff; font-size:12px; font-weight: 500;">İlana Git ↗</a>
             </div>
             """, unsafe_allow_html=True)
         st.divider()
 
-    st.markdown(f"#### 📋 Sourced Registry ({len(df)} total items)")
+    st.markdown(f"#### 📋 Tüm Kayıtlı Araçlar ({len(df)} toplam ilan)")
 
     show_cols = [
         "source_site", "brand", "model", "package_trim", "engine_power",
@@ -515,18 +515,18 @@ if not df.empty:
         use_container_width=True,
         height=500,
         column_config={
-            "link": st.column_config.LinkColumn("Listing URL", display_text="Go to Listing"),
-            "price": st.column_config.NumberColumn("Price (TRY)", format="%d ₺"),
-            "tramer_fee": st.column_config.NumberColumn("Tramer (TRY)", format="%d ₺")
+            "link": st.column_config.LinkColumn("İlan Linki", display_text="İlana Git"),
+            "price": st.column_config.NumberColumn("Fiyat (TL)", format="%d ₺"),
+            "tramer_fee": st.column_config.NumberColumn("Tramer (TL)", format="%d ₺")
         }
     )
     
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🗑️ Clear Database / Delete All Results"):
+    if st.button("🗑️ Tüm Veritabanını Temizle (Bulunan Araçları Sil)"):
         clear_all(engine)
-        st.success("All data successfully cleared.")
+        st.success("Tüm araç verileri başarıyla silindi.")
         st.rerun()
 else:
-    st.info("No matching vehicles have been discovered yet. Please define specifications above and start sourcing.")
+    st.info("Henüz sistemde eşleşen bir araç bulunamadı. Lütfen hedeflerinizi belirleyip taramayı başlatın.")
 
 st.markdown('</div>', unsafe_allow_html=True)
