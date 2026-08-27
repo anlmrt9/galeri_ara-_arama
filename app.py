@@ -387,75 +387,26 @@ target_sites = st.multiselect(
 
 # Allowed damages config
 st.markdown("<br><b>🚘 İnteraktif Araç Hasar Haritası</b>", unsafe_allow_html=True)
-st.markdown("<p style='font-size: 13px; color: #687076;'>Aşağıdaki araç şeması üzerinden hasarlı (boya/değişen) olmasına izin verdiğiniz parçaları seçin. İşaretlenmeyen parçalarda hasar çıkarsa o ilan elenir.</p>", unsafe_allow_html=True)
+st.markdown("<p style='font-size: 13px; color: #687076;'>Aşağıdaki şemada araç parçalarına tıklayarak izin verdiğiniz maksimum hasar durumunu seçin (Gri: Orijinal, Mavi: Boyalı, Kırmızı: Değişen).</p>", unsafe_allow_html=True)
 
-# CSS for a subtle car container
-st.markdown("""
-<style>
-.car-map-container {
-    background-color: #f8fafc;
-    border: 2px dashed #cbd5e1;
-    border-radius: 24px;
-    padding: 20px 10px;
-    margin: 20px auto;
-    max-width: 500px;
-}
-/* Center align checkboxes inside the car map */
-.car-map-container div[data-testid="column"] {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-</style>
-<div class="car-map-container">
-""", unsafe_allow_html=True)
-
-c1, c2, c3 = st.columns([1, 1.5, 1])
-with c2:
-    kaput = st.checkbox("Ön Kaput 🟥")
-
-c4, c5, c6 = st.columns([1, 1.5, 1])
-with c4:
-    sol_on_cam = st.checkbox("Sol Ön Çamurluk")
-with c5:
-    tavan = st.checkbox("Tavan 🟦")
-with c6:
-    sag_on_cam = st.checkbox("Sağ Ön Çamurluk")
-
-c7, c8, c9 = st.columns([1, 1.5, 1])
-with c7:
-    sol_on_kapi = st.checkbox("Sol Ön Kapı")
-with c9:
-    sag_on_kapi = st.checkbox("Sağ Ön Kapı")
-
-c10, c11, c12 = st.columns([1, 1.5, 1])
-with c10:
-    sol_arka_kapi = st.checkbox("Sol Arka Kapı")
-with c12:
-    sag_arka_kapi = st.checkbox("Sağ Arka Kapı")
-
-c13, c14, c15 = st.columns([1, 1.5, 1])
-with c13:
-    sol_arka_cam = st.checkbox("Sol Arka Çamurluk")
-with c14:
-    bagaj = st.checkbox("Arka Bagaj 🟪")
-with c15:
-    sag_arka_cam = st.checkbox("Sağ Arka Çamurluk")
-
-st.markdown("</div>", unsafe_allow_html=True)
+import streamlit.components.v1 as components
+car_map = components.declare_component("car_map", path="car_map_component")
+car_state = car_map(key="car_map", default=None)
 
 allowed_parts = []
-if kaput: allowed_parts.append("kaput")
-if tavan: allowed_parts.append("tavan")
-if bagaj: allowed_parts.append("bagaj")
-if sol_on_cam: allowed_parts.append("sol ön çamurluk")
-if sol_on_kapi: allowed_parts.append("sol ön kapı")
-if sol_arka_kapi: allowed_parts.append("sol arka kapı")
-if sol_arka_cam: allowed_parts.append("sol arka çamurluk")
-if sag_on_cam: allowed_parts.append("sağ ön çamurluk")
-if sag_on_kapi: allowed_parts.append("sağ ön kapı")
-if sag_arka_kapi: allowed_parts.append("sağ arka kapı")
-if sag_arka_cam: allowed_parts.append("sağ arka çamurluk")
+if car_state:
+    # Map component keys to scraper keys
+    mapping = {
+        "kaput": "kaput", "tavan": "tavan", "bagaj": "bagaj",
+        "sol_on_cam": "sol ön çamurluk", "sag_on_cam": "sağ ön çamurluk",
+        "sol_on_kapi": "sol ön kapı", "sag_on_kapi": "sağ ön kapı",
+        "sol_arka_kapi": "sol arka kapı", "sag_arka_kapi": "sağ arka kapı",
+        "sol_arka_cam": "sol arka çamurluk", "sag_arka_cam": "sağ arka çamurluk"
+    }
+    for js_key, val in car_state.items():
+        if val in ["boyali", "degisen"]:
+            if js_key in mapping:
+                allowed_parts.append(mapping[js_key])
 
 st.markdown("<br>", unsafe_allow_html=True)
 

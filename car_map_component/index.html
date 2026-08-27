@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 15px; display: flex; justify-content: center; background: transparent; }
+    .car-container { display: flex; align-items: center; gap: 50px; background-color: #ffffff; padding: 25px 40px; border-radius: 20px; border: 2px dashed #cbd5e1; width: 100%; max-width: 500px; justify-content: center;}
+    .car-grid {
+      display: grid;
+      grid-template-columns: 35px 90px 35px;
+      grid-template-rows: 20px 55px 45px 45px 55px 20px;
+      grid-gap: 5px;
+      position: relative;
+    }
+    .part {
+      background: #cbd5e1; /* Orijinal */
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: bold;
+      color: #64748b;
+      user-select: none;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+    .part:hover { opacity: 0.8; }
+    .part.orijinal { background: #e2e8f0; color: #94a3b8; }
+    .part.boyali { background: #3b82f6; color: white; border-color: #2563eb; }
+    .part.degisen { background: #ef4444; color: white; border-color: #dc2626; }
+    
+    #on_tampon { grid-column: 1 / 4; grid-row: 1; border-radius: 12px 12px 4px 4px; }
+    #sol_on_cam { grid-column: 1; grid-row: 2; border-radius: 12px 4px 4px 8px; }
+    #kaput { grid-column: 2; grid-row: 2; border-radius: 8px 8px 4px 4px; }
+    #sag_on_cam { grid-column: 3; grid-row: 2; border-radius: 4px 12px 8px 4px; }
+    
+    #sol_on_kapi { grid-column: 1; grid-row: 3; }
+    #tavan { grid-column: 2; grid-row: 3 / 5; border-radius: 4px; }
+    #sag_on_kapi { grid-column: 3; grid-row: 3; }
+    
+    #sol_arka_kapi { grid-column: 1; grid-row: 4; }
+    #sag_arka_kapi { grid-column: 3; grid-row: 4; }
+    
+    #sol_arka_cam { grid-column: 1; grid-row: 5; border-radius: 4px 4px 8px 12px; }
+    #bagaj { grid-column: 2; grid-row: 5; border-radius: 4px 4px 12px 12px; }
+    #sag_arka_cam { grid-column: 3; grid-row: 5; border-radius: 4px 4px 12px 8px; }
+    
+    #arka_tampon { grid-column: 1 / 4; grid-row: 6; border-radius: 4px 4px 12px 12px; }
+
+    .legend {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 13px;
+      color: #334155;
+    }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-weight: 500;}
+    .box { width: 18px; height: 18px; border-radius: 4px; border: 2px solid transparent;}
+    .box.orijinal { background: #e2e8f0; }
+    .box.boyali { background: #3b82f6; border-color: #2563eb; }
+    .box.degisen { background: #ef4444; border-color: #dc2626;}
+  </style>
+</head>
+<body>
+  <div class="car-container">
+    <div class="car-grid">
+      <div id="on_tampon" class="part orijinal">T</div>
+      <div id="sol_on_cam" class="part orijinal">Ç</div>
+      <div id="kaput" class="part orijinal">Kaput</div>
+      <div id="sag_on_cam" class="part orijinal">Ç</div>
+      <div id="sol_on_kapi" class="part orijinal">K</div>
+      <div id="tavan" class="part orijinal">Tavan</div>
+      <div id="sag_on_kapi" class="part orijinal">K</div>
+      <div id="sol_arka_kapi" class="part orijinal">K</div>
+      <div id="sag_arka_kapi" class="part orijinal">K</div>
+      <div id="sol_arka_cam" class="part orijinal">Ç</div>
+      <div id="bagaj" class="part orijinal">Bagaj</div>
+      <div id="sag_arka_cam" class="part orijinal">Ç</div>
+      <div id="arka_tampon" class="part orijinal">T</div>
+    </div>
+    
+    <div class="legend">
+      <div class="legend-item"><div class="box orijinal"></div> Orijinal</div>
+      <div class="legend-item"><div class="box boyali"></div> Boyalı</div>
+      <div class="legend-item"><div class="box degisen"></div> Değişen</div>
+      <p style="color: #64748b; font-size: 11px; max-width: 140px; margin-top: 5px; line-height: 1.4;">
+        Tıklayarak durumu değiştirin
+      </p>
+    </div>
+  </div>
+
+  <script>
+    function sendMessageToStreamlitClient(type, data) {
+      const outData = Object.assign({
+        isStreamlitMessage: true,
+        type: type,
+      }, data);
+      window.parent.postMessage(outData, "*");
+    }
+
+    function init() {
+      sendMessageToStreamlitClient("streamlit:componentReady", {apiVersion: 1});
+    }
+
+    function setFrameHeight() {
+      sendMessageToStreamlitClient("streamlit:setFrameHeight", {height: document.body.scrollHeight + 30});
+    }
+
+    function sendValue(value) {
+      sendMessageToStreamlitClient("streamlit:setComponentValue", {value: value});
+    }
+
+    window.addEventListener("message", function(event) {
+      if (event.data.type === "streamlit:render") {
+        setFrameHeight();
+      }
+    });
+
+    const state = {
+      kaput: 'orijinal', tavan: 'orijinal', bagaj: 'orijinal',
+      sol_on_cam: 'orijinal', sol_on_kapi: 'orijinal', sol_arka_kapi: 'orijinal', sol_arka_cam: 'orijinal',
+      sag_on_cam: 'orijinal', sag_on_kapi: 'orijinal', sag_arka_kapi: 'orijinal', sag_arka_cam: 'orijinal',
+      on_tampon: 'orijinal', arka_tampon: 'orijinal'
+    };
+
+    const nextState = {
+      'orijinal': 'boyali',
+      'boyali': 'degisen',
+      'degisen': 'orijinal'
+    };
+
+    document.querySelectorAll('.part').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.id;
+        const current = state[id];
+        const next = nextState[current];
+        state[id] = next;
+        
+        el.classList.remove('orijinal', 'boyali', 'degisen');
+        el.classList.add(next);
+        
+        sendValue(state);
+      });
+    });
+
+    setTimeout(() => {
+        init();
+        setFrameHeight();
+        sendValue(state);
+    }, 100);
+  </script>
+</body>
+</html>
