@@ -386,27 +386,63 @@ target_sites = st.multiselect(
 )
 
 # Allowed damages config
-st.markdown("<br><b>🚘 Kabul Edilebilir Onarımlar (Boya/Değişen)</b>", unsafe_allow_html=True)
-st.markdown("<p style='font-size: 13px; color: #687076;'>Boya veya değişen olmasına göz yumabileceğiniz parçaları işaretleyin. İşaretlenmeyen parçalarda hasar çıkarsa araç sistem tarafından filtrelenir ve karşınıza getirilmez.</p>", unsafe_allow_html=True)
+st.markdown("<br><b>🚘 İnteraktif Araç Hasar Haritası</b>", unsafe_allow_html=True)
+st.markdown("<p style='font-size: 13px; color: #687076;'>Aşağıdaki araç şeması üzerinden hasarlı (boya/değişen) olmasına izin verdiğiniz parçaları seçin. İşaretlenmeyen parçalarda hasar çıkarsa o ilan elenir.</p>", unsafe_allow_html=True)
 
-dmg_col1, dmg_col2, dmg_col3 = st.columns(3)
+# CSS for a subtle car container
+st.markdown("""
+<style>
+.car-map-container {
+    background-color: #f8fafc;
+    border: 2px dashed #cbd5e1;
+    border-radius: 24px;
+    padding: 20px 10px;
+    margin: 20px auto;
+    max-width: 500px;
+}
+/* Center align checkboxes inside the car map */
+.car-map-container div[data-testid="column"] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+</style>
+<div class="car-map-container">
+""", unsafe_allow_html=True)
 
-with dmg_col1:
+c1, c2, c3 = st.columns([1, 1.5, 1])
+with c2:
     kaput = st.checkbox("Ön Kaput 🟥")
-    sol_on_cam = st.checkbox("Sol Ön Çml.")
-    sol_on_kapi = st.checkbox("Sol Ön Kapı")
-    sol_arka_kapi = st.checkbox("Sol Arka Kapı")
-    sol_arka_cam = st.checkbox("Sol Arka Çml.")
 
-with dmg_col2:
+c4, c5, c6 = st.columns([1, 1.5, 1])
+with c4:
+    sol_on_cam = st.checkbox("Sol Ön Çamurluk")
+with c5:
     tavan = st.checkbox("Tavan 🟦")
-    bagaj = st.checkbox("Arka Bagaj 🟪")
+with c6:
+    sag_on_cam = st.checkbox("Sağ Ön Çamurluk")
 
-with dmg_col3:
-    sag_on_cam = st.checkbox("Sağ Ön Çml.")
+c7, c8, c9 = st.columns([1, 1.5, 1])
+with c7:
+    sol_on_kapi = st.checkbox("Sol Ön Kapı")
+with c9:
     sag_on_kapi = st.checkbox("Sağ Ön Kapı")
+
+c10, c11, c12 = st.columns([1, 1.5, 1])
+with c10:
+    sol_arka_kapi = st.checkbox("Sol Arka Kapı")
+with c12:
     sag_arka_kapi = st.checkbox("Sağ Arka Kapı")
-    sag_arka_cam = st.checkbox("Sağ Arka Çml.")
+
+c13, c14, c15 = st.columns([1, 1.5, 1])
+with c13:
+    sol_arka_cam = st.checkbox("Sol Arka Çamurluk")
+with c14:
+    bagaj = st.checkbox("Arka Bagaj 🟪")
+with c15:
+    sag_arka_cam = st.checkbox("Sağ Arka Çamurluk")
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 allowed_parts = []
 if kaput: allowed_parts.append("kaput")
