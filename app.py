@@ -363,20 +363,20 @@ with grid_col2:
 
 p_col1, p_col2, p_col3 = st.columns(3)
 with p_col1:
-    t_min_price = st.number_input("Minimum Fiyat (TL)", value=0, step=50000)
-    t_max_price = st.number_input("Maksimum Fiyat (TL)", value=999999999, step=50000)
+    t_min_price = st.number_input("Minimum Fiyat (TL)", value=None, placeholder="Örn: 500000", step=50000)
+    t_max_price = st.number_input("Maksimum Fiyat (TL)", value=None, placeholder="Limit Yok", step=50000)
 with p_col2:
-    t_min_year = st.number_input("Minimum Yıl", value=1970, step=1)
-    t_max_year = st.number_input("Maksimum Yıl", value=2030, step=1)
+    t_min_year = st.number_input("Minimum Yıl", value=None, placeholder="Örn: 2015", step=1)
+    t_max_year = st.number_input("Maksimum Yıl", value=None, placeholder="Örn: 2024", step=1)
 with p_col3:
-    t_min_km = st.number_input("Minimum Kilometre (KM)", value=0, step=10000)
-    t_max_km = st.number_input("Maksimum Kilometre (KM)", value=1000000, step=10000)
+    t_min_km = st.number_input("Minimum Kilometre (KM)", value=None, placeholder="Örn: 0", step=10000)
+    t_max_km = st.number_input("Maksimum Kilometre (KM)", value=None, placeholder="Limit Yok (Örn: 120000)", step=10000)
 
 p_col4, p_col5 = st.columns(2)
 with p_col4:
-    t_max_tramer = st.number_input("Maksimum Kabul Edilen Tramer (TL)", value=999999999, step=5000)
+    t_max_tramer = st.number_input("Maksimum Kabul Edilen Tramer (TL)", value=None, placeholder="Hasarsız (Örn: 15000)", step=5000)
 with p_col5:
-    t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=1.0, step=0.5)
+    t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=24.0, step=1.0)
 
 st.markdown("<br>", unsafe_allow_html=True)
 target_sites = st.multiselect(
@@ -441,7 +441,7 @@ with act_col2:
                 st.session_state.stop_event.set()
             st.rerun()
     else:
-        st.button("🛑 Terminate Sourcing Session (Disabled)", use_container_width=True, disabled=True)
+        st.button("🛑 Tarama Oturumunu Sonlandır (Devre Dışı)", use_container_width=True, disabled=True)
 
 if submit_btn:
     st.session_state.scan_active = True
@@ -451,10 +451,14 @@ if submit_btn:
     criteria = {
         "sites": target_sites,
         "brand": t_brand, "model": t_model,
-        "min_price": t_min_price, "max_price": t_max_price,
-        "min_year": t_min_year, "max_year": t_max_year,
-        "min_km": t_min_km, "max_km": t_max_km,
-        "max_tramer": t_max_tramer, "duration": t_duration,
+        "min_price": t_min_price if t_min_price is not None else 0,
+        "max_price": t_max_price if t_max_price is not None else 999999999,
+        "min_year": t_min_year if t_min_year is not None else 1970,
+        "max_year": t_max_year if t_max_year is not None else 2030,
+        "min_km": t_min_km if t_min_km is not None else 0,
+        "max_km": t_max_km if t_max_km is not None else 1000000,
+        "max_tramer": t_max_tramer if t_max_tramer is not None else 999999999,
+        "duration": t_duration if t_duration is not None else 24.0,
         "allowed_parts": allowed_parts
     }
     t = threading.Thread(
