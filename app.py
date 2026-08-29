@@ -8,6 +8,7 @@ B2B Stripe-style modern tasarımı uygular.
 import streamlit as st
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 from streamlit.runtime.scriptrunner import add_script_run_ctx
@@ -25,7 +26,11 @@ from scrapers import run_one_cycle
 def background_scan_thread(engine, criteria, stop_event):
     """
     Arka plan tarama döngüsü. Thread-safe durdurma için threading.Event kullanır.
+    GÖREV 2: session_id UUID ile her tarama oturumu takip edilir.
     """
+    session_id = str(uuid.uuid4())  # Benzersiz tarama oturumu ID'si
+    logger.info(f"[Scan] Yeni tarama oturumu basladi: {session_id}")
+
     duration_hours = criteria['duration']
     end_time = datetime.now() + timedelta(hours=duration_hours)
 
@@ -36,10 +41,10 @@ def background_scan_thread(engine, criteria, stop_event):
             logger.info("Tarama stop_event ile durduruldu.")
             break
 
-        run_one_cycle(engine, criteria)
+        run_one_cycle(engine, criteria, session_id=session_id)
         stop_event.wait(timeout=SCRAPER_CYCLE_INTERVAL_SEC)
 
-    logger.info("Tarama döngüsü tamamlandi.")
+    logger.info("Tarama dongusu tamamlandi.")
 
 
 # ==========================================================================

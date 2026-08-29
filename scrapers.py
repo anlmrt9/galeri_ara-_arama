@@ -5,23 +5,74 @@ Otoplus / VavaCars / Otokoç / Arabam.com / Sahibinden
 Her fonksiyon engine + criteria alır, filtrelere uyan araçları DB'ye yazar.
 Genel (site-seviyesi) hatalar -> send_site_failure_notification ile bildirim.
 Tekil ilan hataları -> sadece logger.error.
+GÖREV 2: session_id checkpoint entegrasyonu
+GÖREV 3: @retry_http_request dekoratörü
 """
 
 import re
 import json
 import time
+import uuid
 from datetime import datetime
+from functools import wraps
 from bs4 import BeautifulSoup
 from curl_cffi import requests as cf
 
 from config import (
     SITE_OTOPLUS, SITE_VAVACARS, SITE_OTOKOC, SITE_ARABAM, SITE_SAHIBINDEN,
     SCRAPER_REQUEST_TIMEOUT, SCRAPER_PAGE_WAIT_SEC, SCRAPER_SELENIUM_WAIT_SEC,
-    MAX_NEW_LISTINGS_PER_CYCLE,
+    MAX_NEW_LISTINGS_PER_CYCLE, RETRY_MAX_ATTEMPTS, RETRY_BACKOFF_FACTOR,
 )
 from logger_setup import logger
 from db import listing_exists, insert_car
 from notifications import send_desktop_notification, send_site_failure_notification
+
+
+# ==========================================================================
+#  GÖREV 3: HTTP Retry Dekoratörü
+# ==========================================================================
+
+def retry_http_request(max_attempts=None, backoff_factor=None, base_delay=1):
+    """HTTP isteklerinde exponential backoff (1s, 2s, 4s...)."""
+    if max_attempts is None:
+        max_attempts = RETRY_MAX_ATTEMPTS
+    if backoff_factor is None:
+        backoff_factor = RETRY_BACKOFF_FACTOR
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # HTTP 429 — rate limit: çok daha uzun bekle
+                    if "429" in error_str:
+                        wait_time = base_delay * 10
+                        logger.warning(f"[Rate Limit] HTTP 429 alindi, {wait_time:.0f}s bekleniyor...")
+                        time.sleep(wait_time)
+                        last_exception = e
+                        continue
+                    # HTTP 403 — bot bloğu: devam etme
+                    elif "403" in error_str:
+                        logger.warning(f"[Bot Block] HTTP 403 alindi — bot korumasi tespit edildi: {func.__name__}")
+                        raise e
+
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        wait_time = base_delay * (backoff_factor ** attempt)
+                        logger.warning(
+                            f"[Retry {func.__name__}] Denemesi {attempt+1}/{max_attempts} basarisiz, "
+                            f"{wait_time:.1f}s bekleniyor: {str(e)[:80]}"
+                        )
+                        time.sleep(wait_time)
+
+            logger.error(f"[Retry {func.__name__}] Tum {max_attempts} deneme basarisiz: {last_exception}")
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 # ==========================================================================
@@ -67,6 +118,19 @@ def extract_damaged_parts(text_content):
     return ", ".join(found_parts) if found_parts else "Bilinmiyor/Metinde Yok"
 
 
+# ==========================================================================
+#  GÖREV 3: Retry'lı Sayfa Fetch Yardımcıları
+# ==========================================================================
+
+@retry_http_request(max_attempts=3, backoff_factor=2, base_delay=1)
+def _fetch_page_curl(session, url):
+    """curl_cffi ile sayfa getirir (Otoplus, Otokoç, Arabam için) — retry'lı."""
+    r = session.get(url, impersonate="chrome120", timeout=SCRAPER_REQUEST_TIMEOUT)
+    if r.status_code != 200:
+        raise Exception(f"HTTP {r.status_code}")
+    return r
+
+
 def scrape_listing_details(session, link, allowed_parts=None):
     """Otoplus / Otokoç detay sayfasından tramer, boya, parça bilgilerini çeker."""
     if allowed_parts is None:
@@ -77,10 +141,10 @@ def scrape_listing_details(session, link, allowed_parts=None):
         "rejected": False
     }
     try:
-        r = session.get(link, impersonate="chrome120", timeout=SCRAPER_REQUEST_TIMEOUT)
-
-        if r.status_code != 200:
-            logger.error(f"[Detay] HTTP {r.status_code} alindi: {link}")
+        try:
+            r = _fetch_page_curl(session, link)
+        except Exception as e:
+            logger.error(f"[Detay] Retry sonrasi sayfa alinamadi ({link}): {e}")
             return details
 
         soup = BeautifulSoup(r.text, "lxml")
@@ -130,8 +194,17 @@ def scrape_listing_details(session, link, allowed_parts=None):
 #  OTOPLUS SCRAPER
 # ==========================================================================
 
-def scrape_otoplus(engine, criteria, max_pages_per_cycle=3):
-    """Otoplus ikinci el araç sitesinden veri çeker (curl_cffi + JSON-LD)."""
+def scrape_otoplus(engine, criteria, max_pages_per_cycle=3, session_id: str = None):
+    """Otoplus ikinci el araç sitesinden veri çeker (curl_cffi + JSON-LD). GÖREV 2: checkpoint destekli."""
+    from db import get_or_create_session, update_session_checkpoint, mark_session_complete, mark_session_failed
+
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
+    # GÖREV 2: Kaldığı yerden başla
+    checkpoint = get_or_create_session(engine, session_id, SITE_OTOPLUS)
+    start_page = checkpoint.get("page", 0)
+
     base_url = "https://www.otoplus.com/ikinci-el-araba"
     target_brand_slug = criteria['brand'].strip().lower().replace(" ", "-")
     if target_brand_slug and target_brand_slug != "tümü":
@@ -139,15 +212,16 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3):
 
     session = cf.Session()
 
-    for page in range(1, max_pages_per_cycle + 1):
+    for page in range(start_page + 1, start_page + max_pages_per_cycle + 1):
         url = base_url if page == 1 else f"{base_url}?sayfa={page}"
         try:
-            r = session.get(url, impersonate="chrome120", timeout=SCRAPER_REQUEST_TIMEOUT)
-
-            if r.status_code != 200:
-                logger.error(f"[{SITE_OTOPLUS}] HTTP {r.status_code} alindi (sayfa {page})")
-                # Site seviyesi hata → bildirim gönder
-                send_site_failure_notification(SITE_OTOPLUS, f"HTTP {r.status_code} hatası")
+            # GÖREV 3: Retry'lı fetch
+            try:
+                r = _fetch_page_curl(session, url)
+            except Exception as fetch_err:
+                logger.error(f"[{SITE_OTOPLUS}] Sayfa {page} retry sonrasi alinamadi: {fetch_err}")
+                send_site_failure_notification(SITE_OTOPLUS, str(fetch_err))
+                mark_session_failed(engine, session_id, SITE_OTOPLUS, str(fetch_err))
                 return
 
             soup = BeautifulSoup(r.text, "lxml")
@@ -188,7 +262,6 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3):
                             continue
 
                         # 2. AŞAMA FİLTRE (Detay sayfası: Tramer & Boya)
-                        # BUG FIX: scrape_listing_details iki kez çağrılıyordu, tek çağrıya düşürüldü
                         details = scrape_listing_details(
                             session, link, allowed_parts=criteria.get("allowed_parts", [])
                         )
@@ -220,24 +293,30 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3):
                         time.sleep(1)
 
                 except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    # Tekil ilan/tag parse hatası — bildirime gerek yok, sadece logla
                     logger.error(f"[{SITE_OTOPLUS}] JSON-LD parse hatasi: {e}")
 
+            # GÖREV 2: Checkpoint güncelle
+            update_session_checkpoint(engine, session_id, SITE_OTOPLUS, page, "")
+
         except Exception as e:
-            # Site seviyesi genel hata → hem logla hem bildir
             logger.error(f"[{SITE_OTOPLUS}] Sayfa {page} hata: {e}")
             send_site_failure_notification(SITE_OTOPLUS, str(e))
+            mark_session_failed(engine, session_id, SITE_OTOPLUS, str(e))
             return
 
         time.sleep(SCRAPER_PAGE_WAIT_SEC)
+
+    mark_session_complete(engine, session_id, SITE_OTOPLUS)
 
 
 # ==========================================================================
 #  VAVACARS SCRAPER
 # ==========================================================================
 
-def scrape_vavacars(engine, criteria):
-    """VavaCars için veri çekme (SeleniumBase UC Mode)."""
+def scrape_vavacars(engine, criteria, session_id: str = None):
+    """VavaCars için veri çekme (SeleniumBase UC Mode). GÖREV 2: session_id destekli."""
+    if not session_id:
+        session_id = str(uuid.uuid4())
     target_brand = criteria['brand'].strip() if criteria['brand'] and criteria['brand'] != "Tümü" else ""
     base_url = f"https://tr.vava.cars/buy/cars/{target_brand}" if target_brand else "https://tr.vava.cars/buy/cars"
 
@@ -340,8 +419,11 @@ def scrape_vavacars(engine, criteria):
 #  OTOKOÇ SCRAPER
 # ==========================================================================
 
-def scrape_otokoc(engine, criteria):
-    """Otokoç 2. El için veri çekme (__NEXT_DATA__ JSON parse)."""
+def scrape_otokoc(engine, criteria, session_id: str = None):
+    """Otokoç 2. El için veri çekme (__NEXT_DATA__ JSON parse). GÖREV 2: session_id destekli."""
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
     target_brand_slug = (
         criteria['brand'].strip().lower().replace(" ", "-")
         if criteria['brand'] and criteria['brand'] != "Tümü" else ""
@@ -353,11 +435,12 @@ def scrape_otokoc(engine, criteria):
 
     session = cf.Session()
     try:
-        r = session.get(url, impersonate="chrome120", timeout=SCRAPER_REQUEST_TIMEOUT)
-
-        if r.status_code != 200:
-            logger.error(f"[{SITE_OTOKOC}] HTTP {r.status_code} alindi")
-            send_site_failure_notification(SITE_OTOKOC, f"HTTP {r.status_code} hatası")
+        # GÖREV 3: Retry'lı fetch
+        try:
+            r = _fetch_page_curl(session, url)
+        except Exception as fetch_err:
+            logger.error(f"[{SITE_OTOKOC}] Retry sonrasi sayfa alinamadi: {fetch_err}")
+            send_site_failure_notification(SITE_OTOKOC, str(fetch_err))
             return
 
         match = re.search(
@@ -461,8 +544,10 @@ def scrape_otokoc(engine, criteria):
 #  ARABAM.COM SCRAPER
 # ==========================================================================
 
-def scrape_arabam(engine, criteria):
-    """Arabam.com için veri çekme (SeleniumBase UC Mode)."""
+def scrape_arabam(engine, criteria, session_id: str = None):
+    """Arabam.com için veri çekme (SeleniumBase UC Mode). GÖREV 2: session_id destekli."""
+    if not session_id:
+        session_id = str(uuid.uuid4())
     target_brand_slug = (
         criteria['brand'].strip().lower().replace(" ", "-")
         if criteria['brand'] and criteria['brand'] != "Tümü" else ""
@@ -578,13 +663,16 @@ def scrape_sahibinden(engine, criteria):
 #  TEK DÖNGÜ ÇALIŞTIRICI
 # ==========================================================================
 
-def run_one_cycle(engine, criteria):
+def run_one_cycle(engine, criteria, session_id: str = None):
     """
-    Seçilen tüm siteleri sırayla bir kez tarar.
+    Seçilen tüm siteleri sırayla bir kez tarar. GÖREV 2: session_id checkpoint ile ilerlemeyi takip eder.
     Her scraper'ın kendi try/except'i var ama burada da üst düzey bir
     güvenlik ağı bulunuyor: bir scraper tamamen çökerse (import hatası,
     beklenmedik TypeError vb.) kullanıcıya bildirim gönderilir.
     """
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
     site_scraper_map = {
         SITE_OTOPLUS: scrape_otoplus,
         SITE_VAVACARS: scrape_vavacars,
@@ -602,9 +690,9 @@ def run_one_cycle(engine, criteria):
             continue
         try:
             if site_name == SITE_OTOPLUS:
-                scraper_fn(engine, criteria, max_pages_per_cycle=3)
+                scraper_fn(engine, criteria, max_pages_per_cycle=3, session_id=session_id)
             else:
-                scraper_fn(engine, criteria)
+                scraper_fn(engine, criteria, session_id=session_id)
         except Exception as e:
             # Scraper fonksiyonu tamamen çöktü (beklenmedik hata)
             logger.error(f"[{site_name}] run_one_cycle icinde BEKLENMEDIK COKME: {e}")
