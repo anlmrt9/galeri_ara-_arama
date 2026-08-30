@@ -1,0 +1,11 @@
+streamlit>=1.35.0
+streamlit-autorefresh>=0.0.1
+sqlalchemy>=2.0.0
+pandas>=2.0.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+curl_cffi>=0.7.0
+seleniumbase>=4.29.0
+psycopg2-binary>=2.9.0
+pyodbc; sys_platform == "win32"
+win11toast; sys_platform == "win32"
