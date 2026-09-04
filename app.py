@@ -358,6 +358,23 @@ st.markdown("""
     }
     .new-listing b { color: #ffffff; }
 
+    /* ---------- FİLTRE PANELİ (st.expander) ---------- */
+    div[data-testid="stExpander"] {
+        background-color: var(--navy) !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 12px !important;
+        margin-bottom: 1.5rem;
+    }
+    div[data-testid="stExpander"] summary {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        font-size: 14.5px !important;
+        padding: 0.9rem 1rem !important;
+    }
+    div[data-testid="stExpander"] summary:hover { color: var(--pink) !important; }
+    div[data-testid="stExpander"] svg { fill: var(--muted) !important; }
+    div[data-testid="stExpanderDetails"] { padding: 0.25rem 1rem 1rem 1rem !important; }
+
     /* ---------- QUICK ACTIONS: dar ekranlarda da yatay kalsın ---------- */
     .st-key-quick_actions div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
@@ -596,22 +613,23 @@ with grid_col2:
     else:
         t_model = st.selectbox("Model Seçin", ["Tümü"] + sorted(CAR_CATALOG[t_brand]))
 
-p_col1, p_col2, p_col3 = st.columns(3)
-with p_col1:
-    t_min_price = st.number_input("Minimum Fiyat (TL)", value=None, placeholder="Örn: 500000", step=50000)
-    t_max_price = st.number_input("Maksimum Fiyat (TL)", value=None, placeholder="Limit Yok", step=50000)
-with p_col2:
-    t_min_year = st.number_input("Minimum Yıl", value=None, placeholder="Örn: 2015", step=1)
-    t_max_year = st.number_input("Maksimum Yıl", value=None, placeholder="Örn: 2024", step=1)
-with p_col3:
-    t_min_km = st.number_input("Minimum Kilometre (KM)", value=None, placeholder="Örn: 0", step=10000)
-    t_max_km = st.number_input("Maksimum Kilometre (KM)", value=None, placeholder="Limit Yok (Örn: 120000)", step=10000)
+with st.expander("🎚️ Fiyat / Yıl / Kilometre / Tramer Filtreleri", expanded=False):
+    p_col1, p_col2, p_col3 = st.columns(3)
+    with p_col1:
+        t_min_price = st.number_input("Minimum Fiyat (TL)", value=None, placeholder="Örn: 500000", step=50000)
+        t_max_price = st.number_input("Maksimum Fiyat (TL)", value=None, placeholder="Limit Yok", step=50000)
+    with p_col2:
+        t_min_year = st.number_input("Minimum Yıl", value=None, placeholder="Örn: 2015", step=1)
+        t_max_year = st.number_input("Maksimum Yıl", value=None, placeholder="Örn: 2024", step=1)
+    with p_col3:
+        t_min_km = st.number_input("Minimum Kilometre (KM)", value=None, placeholder="Örn: 0", step=10000)
+        t_max_km = st.number_input("Maksimum Kilometre (KM)", value=None, placeholder="Limit Yok (Örn: 120000)", step=10000)
 
-p_col4, p_col5 = st.columns(2)
-with p_col4:
-    t_max_tramer = st.number_input("Maksimum Kabul Edilen Tramer (TL)", value=None, placeholder="Hasarsız (Örn: 15000)", step=5000)
-with p_col5:
-    t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=24.0, step=1.0)
+    p_col4, p_col5 = st.columns(2)
+    with p_col4:
+        t_max_tramer = st.number_input("Maksimum Kabul Edilen Tramer (TL)", value=None, placeholder="Hasarsız (Örn: 15000)", step=5000)
+    with p_col5:
+        t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=24.0, step=1.0)
 
 st.markdown("<br>", unsafe_allow_html=True)
 target_sites = st.multiselect(
