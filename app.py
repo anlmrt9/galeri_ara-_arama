@@ -284,14 +284,14 @@ st.markdown("""
         text-align: center; font-size: 12.5px; font-weight: 500; color: #c7cae3;
         margin-top: 6px; display: block;
     }
-    div[data-testid="column"] .qa-btn button {
+    div[data-testid="stColumn"] .qa-btn button {
         width: 52px !important; height: 52px !important; border-radius: 50% !important;
         background: var(--surface) !important; border: none !important;
         font-size: 19px !important; display: flex !important; align-items: center; justify-content: center;
         margin: 0 auto !important; padding: 0 !important;
     }
-    div[data-testid="column"] .qa-btn button:hover { background: var(--surface-hover) !important; }
-    div[data-testid="column"] .qa-btn button:disabled { opacity: 0.35 !important; }
+    div[data-testid="stColumn"] .qa-btn button:hover { background: var(--surface-hover) !important; }
+    div[data-testid="stColumn"] .qa-btn button:disabled { opacity: 0.35 !important; }
     .qa-anchor {
         width: 52px; height: 52px; border-radius: 50%; background: var(--surface);
         display: flex; align-items: center; justify-content: center; font-size: 19px;
@@ -357,6 +357,25 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     .new-listing b { color: #ffffff; }
+
+    /* ---------- QUICK ACTIONS: dar ekranlarda da yatay kalsın ---------- */
+    .st-key-quick_actions div[data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        gap: 8px !important;
+    }
+    .st-key-quick_actions div[data-testid="stColumn"] {
+        min-width: 0 !important;
+        width: auto !important;
+        flex: 1 1 0 !important;
+    }
+
+    /* ---------- Genel mobil ayarları ---------- */
+    @media (max-width: 480px) {
+        .topbar { padding: 0 6% 1.5rem 6%; }
+        .parameter-card { margin: 0 6%; padding: 1.5rem 1.25rem; }
+        div[style*="padding: 0 10%"] { padding: 0 6% !important; }
+        .balance-amount { font-size: 28px; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -436,35 +455,36 @@ st.markdown(f"""
 #  QUICK ACTIONS: BAŞLAT / DURDUR / TEMİZLE / YENİLE
 # ==========================================================================
 
-qa1, qa2, qa3, qa4 = st.columns(4)
+with st.container(key="quick_actions"):
+    qa1, qa2, qa3, qa4 = st.columns(4)
 
-with qa1:
-    st.markdown('<a class="qa-anchor" href="#hedef-arac-ozellikleri">▶️</a><span class="qa-label">Başlat</span>', unsafe_allow_html=True)
+    with qa1:
+        st.markdown('<a class="qa-anchor" href="#hedef-arac-ozellikleri">▶️</a><span class="qa-label">Başlat</span>', unsafe_allow_html=True)
 
-with qa2:
-    st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
-    stop_clicked = st.button("⏹", key="qa_stop", disabled=not st.session_state.scan_active)
-    st.markdown('</div><span class="qa-label">Durdur</span>', unsafe_allow_html=True)
-    if stop_clicked:
-        st.session_state.scan_active = False
-        if st.session_state.stop_event:
-            st.session_state.stop_event.set()
-        st.rerun()
+    with qa2:
+        st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
+        stop_clicked = st.button("⏹", key="qa_stop", disabled=not st.session_state.scan_active)
+        st.markdown('</div><span class="qa-label">Durdur</span>', unsafe_allow_html=True)
+        if stop_clicked:
+            st.session_state.scan_active = False
+            if st.session_state.stop_event:
+                st.session_state.stop_event.set()
+            st.rerun()
 
-with qa3:
-    st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
-    clear_clicked = st.button("🧹", key="qa_clear", disabled=df.empty)
-    st.markdown('</div><span class="qa-label">Temizle</span>', unsafe_allow_html=True)
-    if clear_clicked:
-        clear_all(engine)
-        st.rerun()
+    with qa3:
+        st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
+        clear_clicked = st.button("🧹", key="qa_clear", disabled=df.empty)
+        st.markdown('</div><span class="qa-label">Temizle</span>', unsafe_allow_html=True)
+        if clear_clicked:
+            clear_all(engine)
+            st.rerun()
 
-with qa4:
-    st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
-    refresh_clicked = st.button("🔄", key="qa_refresh")
-    st.markdown('</div><span class="qa-label">Yenile</span>', unsafe_allow_html=True)
-    if refresh_clicked:
-        st.rerun()
+    with qa4:
+        st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
+        refresh_clicked = st.button("🔄", key="qa_refresh")
+        st.markdown('</div><span class="qa-label">Yenile</span>', unsafe_allow_html=True)
+        if refresh_clicked:
+            st.rerun()
 
 st.markdown("<div style='height: 2.5rem;'></div>", unsafe_allow_html=True)
 
