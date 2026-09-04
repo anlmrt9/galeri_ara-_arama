@@ -80,33 +80,119 @@ pwa_components.html("""
 <script>
 (function() {
     const doc = window.parent.document;
-    if (doc.getElementById('pwa-manifest')) return;
+    const win = window.parent;
 
-    const manifest = doc.createElement('link');
-    manifest.id = 'pwa-manifest';
-    manifest.rel = 'manifest';
-    manifest.href = 'app/static/manifest.json';
-    doc.head.appendChild(manifest);
+    function addMeta(name, content) {
+        if (doc.querySelector(`meta[name="${name}"]`)) return;
+        const m = doc.createElement('meta');
+        m.name = name;
+        m.content = content;
+        doc.head.appendChild(m);
+    }
 
-    const themeColor = doc.createElement('meta');
-    themeColor.name = 'theme-color';
-    themeColor.content = '#0f1225';
-    doc.head.appendChild(themeColor);
+    if (!doc.getElementById('pwa-manifest')) {
+        const manifest = doc.createElement('link');
+        manifest.id = 'pwa-manifest';
+        manifest.rel = 'manifest';
+        manifest.href = 'app/static/manifest.json';
+        doc.head.appendChild(manifest);
 
-    const appleTouchIcon = doc.createElement('link');
-    appleTouchIcon.rel = 'apple-touch-icon';
-    appleTouchIcon.href = 'app/static/icon-192.png';
-    doc.head.appendChild(appleTouchIcon);
+        const appleTouchIcon = doc.createElement('link');
+        appleTouchIcon.rel = 'apple-touch-icon';
+        appleTouchIcon.href = 'app/static/icon-192.png';
+        doc.head.appendChild(appleTouchIcon);
 
-    const appleCapable = doc.createElement('meta');
-    appleCapable.name = 'apple-mobile-web-app-capable';
-    appleCapable.content = 'yes';
-    doc.head.appendChild(appleCapable);
+        addMeta('theme-color', '#0f1225');
+        addMeta('mobile-web-app-capable', 'yes');
+        addMeta('apple-mobile-web-app-capable', 'yes');
+        addMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
+        addMeta('apple-mobile-web-app-title', 'OtoGaleri');
+        addMeta('format-detection', 'telephone=no');
 
-    if ('serviceWorker' in window.parent.navigator) {
-        window.parent.navigator.serviceWorker.register('app/static/sw.js', { scope: '/' }).catch(function() {
-            window.parent.navigator.serviceWorker.register('app/static/sw.js').catch(function() {});
+        const viewport = doc.querySelector('meta[name="viewport"]');
+        if (viewport && viewport.content.indexOf('viewport-fit') === -1) {
+            viewport.content = viewport.content + ', viewport-fit=cover';
+        }
+    }
+
+    if ('serviceWorker' in win.navigator) {
+        win.navigator.serviceWorker.register('app/static/sw.js', { scope: '/' }).catch(function() {
+            win.navigator.serviceWorker.register('app/static/sw.js').catch(function() {});
         });
+    }
+
+    // ---- "Uygulamayı Yükle" yüzen buton (Android/Chrome: beforeinstallprompt) ----
+    if (!doc.getElementById('pwa-install-btn')) {
+        const btn = doc.createElement('button');
+        btn.id = 'pwa-install-btn';
+        btn.type = 'button';
+        btn.textContent = '📲 Uygulamayı Yükle';
+        btn.style.cssText = `
+            position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(80px);
+            z-index: 999999; display: flex; align-items: center; gap: 8px;
+            padding: 12px 22px; border: none; border-radius: 50px;
+            background: linear-gradient(135deg, #6a3df5 0%, #b84ffb 100%);
+            color: #ffffff; font-family: 'Inter', -apple-system, sans-serif;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            box-shadow: 0 12px 28px rgba(106, 61, 245, 0.5);
+            opacity: 0; pointer-events: none; transition: opacity 0.25s ease, transform 0.25s ease;
+            padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        `;
+        doc.body.appendChild(btn);
+
+        let deferredPrompt = null;
+        win.addEventListener('beforeinstallprompt', function(e) {
+            e.preventDefault();
+            deferredPrompt = e;
+            btn.style.opacity = '1';
+            btn.style.pointerEvents = 'auto';
+            btn.style.transform = 'translateX(-50%) translateY(0)';
+        });
+
+        btn.addEventListener('click', function() {
+            if (!deferredPrompt) return;
+            btn.style.opacity = '0';
+            btn.style.pointerEvents = 'none';
+            deferredPrompt.prompt();
+            deferredPrompt.finally && deferredPrompt.finally(function() { deferredPrompt = null; });
+            deferredPrompt = null;
+        });
+
+        win.addEventListener('appinstalled', function() {
+            btn.style.opacity = '0';
+            btn.style.pointerEvents = 'none';
+        });
+    }
+
+    // ---- iOS Safari: manuel "Ana Ekrana Ekle" ipucu (bir kere gösterilir) ----
+    const isIOS = /iphone|ipad|ipod/i.test(win.navigator.userAgent);
+    const isStandalone = win.navigator.standalone === true ||
+        win.matchMedia('(display-mode: standalone)').matches;
+    if (isIOS && !isStandalone && !doc.getElementById('pwa-ios-hint')) {
+        let dismissed = false;
+        try { dismissed = win.localStorage.getItem('otogaleri_ios_hint_dismissed') === '1'; } catch (e) {}
+        if (!dismissed) {
+            const hint = doc.createElement('div');
+            hint.id = 'pwa-ios-hint';
+            hint.style.cssText = `
+                position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 999999;
+                background: #191d33; color: #ffffff; border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 14px; padding: 12px 16px; font-family: 'Inter', -apple-system, sans-serif;
+                font-size: 13px; line-height: 1.4; display: flex; align-items: center; gap: 10px;
+                box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+                padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+            `;
+            hint.innerHTML = `
+                <span style="flex:1;">📲 Uygulama olarak kullanmak için paylaş (⬆️) simgesine, ardından
+                <b>"Ana Ekrana Ekle"</b> seçeneğine dokunun.</span>
+                <button id="pwa-ios-hint-close" style="background:none;border:none;color:#8a8fb8;font-size:18px;cursor:pointer;padding:0 4px;">✕</button>
+            `;
+            doc.body.appendChild(hint);
+            doc.getElementById('pwa-ios-hint-close').addEventListener('click', function() {
+                hint.remove();
+                try { win.localStorage.setItem('otogaleri_ios_hint_dismissed', '1'); } catch (e) {}
+            });
+        }
     }
 })();
 </script>
