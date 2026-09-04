@@ -32,10 +32,10 @@ Belirlediğiniz kriterlere (marka, model, fiyat, yıl, kilometre, tramer) uyan i
 - Microsoft SQL Server (yerel veya erişilebilir bir örnek) ve **ODBC Driver 17 for SQL Server**
 - Windows (masaüstü bildirimleri için; diğer platformlarda bildirimler yerine log kaydı düşer)
 
-Gerekli Python paketleri (proje içinde `requirements.txt` bulunmuyor, aşağıdaki paketleri kurmanız gerekir):
+Gerekli Python paketleri `requirements.txt` içinde tanımlıdır:
 
 ```bash
-pip install streamlit streamlit-autorefresh pandas plotly sqlalchemy pyodbc curl_cffi beautifulsoup4 win11toast
+pip install -r requirements.txt
 ```
 
 ## Kurulum
@@ -74,6 +74,30 @@ Alternatif olarak, yalnızca Otoplus için kendi içinde scraping yapan eski pan
 ```bash
 streamlit run dashboard.py
 ```
+
+## Bulut Dağıtımı (Streamlit Community Cloud + Supabase)
+
+Proje, yerel SQL Server yerine bulut tabanlı bir PostgreSQL (Supabase) veritabanıyla da çalışacak şekilde hazırlanmıştır. `config.py`/`db.py` içinde `DATABASE_URL` tanımlıysa PostgreSQL, tanımlı değilse yerel SQL Server kullanılır — kod değişikliği gerekmez.
+
+1. **Supabase projesi oluşturun** ([supabase.com](https://supabase.com)) ve *Settings → Database → Connection String → URI* kısmından bağlantı adresini alın.
+2. **Bu repoyu GitHub'a bağlayın** (zaten `anlmrt9/galeri_ara-_arama` reposuna push edilmiş durumda).
+3. [share.streamlit.io](https://share.streamlit.io) üzerinden GitHub hesabınızla giriş yapıp bu repoyu seçerek "New app" ile deploy edin (`app.py`'yi ana dosya olarak gösterin).
+4. Uygulama ayarlarında **Secrets** bölümüne `.streamlit/secrets.toml.example` dosyasındaki şablonu kendi Supabase bağlantı adresinizle doldurup yapıştırın:
+   ```toml
+   DATABASE_URL = "postgresql://postgres:SIFRENIZ@db.XXXX.supabase.co:5432/postgres"
+   ```
+5. Deploy tamamlandığında size `https://<uygulama-adi>.streamlit.app` şeklinde herkese açık bir adres verilir.
+
+**Önemli sınırlamalar:** Streamlit Community Cloud'un ücretsiz katmanı, uzun süre çalışan arka plan iş parçacıkları (`background_scan_thread`) için tasarlanmamıştır — uygulama bir süre etkileşim almazsa konteyner uyku moduna geçer ve aktif tarama durur. Ayrıca VavaCars ve Arabam.com scraperları `seleniumbase` ile gerçek bir Chrome tarayıcısı gerektirir; bu, Community Cloud'un varsayılan ortamında güvenilir çalışmayabilir. `curl_cffi` tabanlı Otoplus scraper'ı bu kısıtlamalardan etkilenmez. Kesintisiz 7/24 tarama için yerel çalıştırma (veya kendi sunucunuz) hâlâ en güvenilir yöntemdir; bulut dağıtımı daha çok "istediğiniz an açıp sonuçlara bakma" senaryosu için uygundur.
+
+## Mobil Uygulama Olarak Kurulum (PWA)
+
+Uygulama, telefonunuzda gerçek bir uygulama gibi görünüp açılabilmesi için bir **Progressive Web App (PWA)** katmanıyla donatılmıştır (`static/manifest.json`, `static/sw.js`, uygulama ikonları). Bulutta deploy ettikten sonra (HTTPS zorunludur, bu yüzden yerel `localhost` üzerinde "Ana Ekrana Ekle" çalışmaz):
+
+- **Android (Chrome):** Uygulama adresini açın → sağ üstteki ⋮ menüsü → **"Uygulamayı yükle"** veya **"Ana ekrana ekle"**.
+- **iPhone (Safari):** Uygulama adresini açın → paylaş simgesi (□↑) → **"Ana Ekrana Ekle"**.
+
+Ekleme sonrası uygulama kendi ikonuyla, adres çubuğu olmadan tam ekran açılır. Streamlit'in statik dosya sunumundaki kısıtlama nedeniyle service worker'ın kapsamı `/app/static/` ile sınırlı kalır (bu yalnızca çevrimdışı önbellekleme özelliğini etkiler); ana ekrana ekleme, ikon ve tam ekran açılış davranışı bundan etkilenmez.
 
 ## Notlar
 

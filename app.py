@@ -1,8 +1,8 @@
 """
-app.py - OtoGaleriBot Streamlit Arayüzü (B2B Redesign)
-======================================================
+app.py - OtoGaleriBot Streamlit Arayüzü (Neo-Fintech Redesign)
+================================================================
 Sadece UI katmanı. İş mantığı scrapers.py, db.py, notifications.py'de.
-B2B Stripe-style modern tasarımı uygular.
+Monzo/Revolut tarzı koyu lacivert (neo-fintech) tasarımı uygular.
 """
 
 import streamlit as st
@@ -47,8 +47,20 @@ def background_scan_thread(engine, criteria, stop_event):
     logger.info("Tarama dongusu tamamlandi.")
 
 
+def format_try(value):
+    """34.980.5 -> '34.980,50' bicimine (TR yerel ayari) cevirir."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "0,00"
+    formatted = f"{value:,.2f}"
+    # 1,234,567.89 (US) -> 1.234.567,89 (TR)
+    formatted = formatted.replace(",", "§").replace(".", ",").replace("§", ".")
+    return formatted
+
+
 # ==========================================================================
-#  STREAMLIT CONFIG & CUSTOM B2B THEME
+#  STREAMLIT CONFIG & NEO-FINTECH DARK THEME
 # ==========================================================================
 
 st.set_page_config(page_title="OtoGaleri Avcı Botu | Sourcing Infrastructure", layout="wide", page_icon="🎯")
@@ -57,173 +69,208 @@ st.set_page_config(page_title="OtoGaleri Avcı Botu | Sourcing Infrastructure", 
 if st.session_state.get('scan_active', False):
     st_autorefresh(interval=15000, key="datarefresh")
 
-# Inject Custom B2B Styling
-st.markdown("""
-<style>
-    /* Global Styles */
-    .stApp {
-        background-color: #ffffff !important;
-        color: #0d0c10 !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+if "display_id" not in st.session_state:
+    st.session_state.display_id = str(uuid.uuid4())[:4].upper()
+
+# ==========================================================================
+#  PWA: manifest + service worker (telefonda "Ana Ekrana Ekle" desteği)
+# ==========================================================================
+import streamlit.components.v1 as pwa_components
+pwa_components.html("""
+<script>
+(function() {
+    const doc = window.parent.document;
+    if (doc.getElementById('pwa-manifest')) return;
+
+    const manifest = doc.createElement('link');
+    manifest.id = 'pwa-manifest';
+    manifest.rel = 'manifest';
+    manifest.href = 'app/static/manifest.json';
+    doc.head.appendChild(manifest);
+
+    const themeColor = doc.createElement('meta');
+    themeColor.name = 'theme-color';
+    themeColor.content = '#0f1225';
+    doc.head.appendChild(themeColor);
+
+    const appleTouchIcon = doc.createElement('link');
+    appleTouchIcon.rel = 'apple-touch-icon';
+    appleTouchIcon.href = 'app/static/icon-192.png';
+    doc.head.appendChild(appleTouchIcon);
+
+    const appleCapable = doc.createElement('meta');
+    appleCapable.name = 'apple-mobile-web-app-capable';
+    appleCapable.content = 'yes';
+    doc.head.appendChild(appleCapable);
+
+    if ('serviceWorker' in window.parent.navigator) {
+        window.parent.navigator.serviceWorker.register('app/static/sw.js', { scope: '/' }).catch(function() {
+            window.parent.navigator.serviceWorker.register('app/static/sw.js').catch(function() {});
+        });
     }
-    
+})();
+</script>
+""", height=0, width=0)
+
+# Inject Custom Neo-Fintech Styling
+st.markdown("""
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --navy: #0f1225;
+        --surface: #191d33;
+        --surface-hover: #22274a;
+        --violet: #6a3df5;
+        --pink: #b84ffb;
+        --green: #2ecc71;
+        --muted: #8a8fb8;
+    }
+
+    /* Global Styles */
+    html, body, .stApp {
+        background-color: var(--navy) !important;
+        color: #ffffff !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    .tnum {
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1;
+        font-weight: 700;
+    }
+
     /* Remove default streamlit header margin */
     .block-container {
-        padding-top: 0rem !important;
+        padding-top: 1.5rem !important;
         padding-left: 0rem !important;
         padding-right: 0rem !important;
         padding-bottom: 3rem !important;
+        max-width: 1100px;
     }
-    
-    /* Hero section styles with multi-stop pastel gradient band */
-    .hero-container {
-        background: linear-gradient(135deg, #a0c4ff 0%, #c8b6ff 30%, #bdf0e0 70%, #fffdd0 100%);
-        padding: 5rem 10% 4rem 10%;
-        border-bottom: 1px solid #eaeaea;
-        color: #0d0c10;
-        margin-bottom: 2rem;
-    }
-    
-    .hero-headline {
-        font-size: 62px;
-        font-weight: 600;
-        letter-spacing: -2px;
-        line-height: 1.1;
-        color: #0d0c10;
-        margin-bottom: 1.5rem;
-    }
-    
-    .hero-body {
-        font-size: 18px;
-        color: #687076;
-        line-height: 1.5;
-        margin-bottom: 2rem;
-        max-width: 600px;
-    }
-    
-    /* Feature cards styles */
-    .feature-card {
-        background-color: #ffffff;
-        border-radius: 8px;
-        padding: 1.5rem;
-        border: 1px solid #e1e4e6;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-        height: 100%;
-    }
-    
-    .feature-icon-tile {
-        width: 30px;
-        height: 30px;
-        border-radius: 6px;
+
+    [data-testid="stHeader"] { background-color: var(--navy) !important; }
+    [data-testid="stSidebar"] { display: none; }
+
+    /* ---------- TOP BAR ---------- */
+    .topbar {
         display: flex;
         align-items: center;
-        justify-content: center;
-        font-size: 14px;
-        margin-bottom: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        justify-content: space-between;
+        padding: 0 10% 1.5rem 10%;
     }
-    
-    .feature-title {
-        font-size: 16px;
-        margin: 0 0 8px 0;
-        color: #0d0c10;
-        font-weight: 600;
+    .greeting-hello { font-size: 13px; font-weight: 400; color: var(--muted); display: block; }
+    .greeting-name { font-size: 20px; font-weight: 600; color: #ffffff; }
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .sparkline { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+    .sparkline span {
+        display: block; width: 4px; height: var(--h); border-radius: 2px;
+        background: linear-gradient(180deg, var(--pink) 0%, var(--violet) 100%);
+        opacity: 0.9;
     }
-    
-    .feature-text {
-        font-size: 13px;
-        color: #687076;
-        margin: 0;
-        line-height: 1.4;
+    .bell-wrap { position: relative; width: 38px; height: 38px; border-radius: 50%;
+        background: var(--surface); display: flex; align-items: center; justify-content: center; }
+    .notif-dot { position: absolute; top: 7px; right: 8px; width: 8px; height: 8px;
+        border-radius: 50%; background: #ff4d6a; box-shadow: 0 0 0 2px var(--surface); }
+
+    /* ---------- BALANCE ---------- */
+    .balance-block { text-align: center; margin-bottom: 1.75rem; }
+    .balance-label { font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
+    .balance-amount { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+
+    /* ---------- HERO CARD ---------- */
+    .hero-card-wrap { display: flex; justify-content: center; margin-bottom: 2rem; }
+    .hero-card {
+        width: 200px; height: 126px; border-radius: 14px; padding: 16px;
+        background: linear-gradient(135deg, var(--violet) 0%, var(--pink) 100%);
+        box-shadow: 0 18px 34px rgba(106, 61, 245, 0.45);
+        transform: rotate(-6deg);
+        display: flex; flex-direction: column; justify-content: space-between;
     }
-    
-    /* Logo Strip */
-    .logo-strip {
-        display: flex;
-        justify-content: space-around;
-        align-items: center;
-        padding: 2rem 0;
-        opacity: 0.4;
-        border-top: 1px solid #eaeaea;
-        border-bottom: 1px solid #eaeaea;
-        margin: 3rem 10% 2rem 10%;
+    .hero-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+    .chip { width: 26px; height: 20px; border-radius: 4px; background: linear-gradient(135deg, #ffe9a8, #d8b45c); }
+    .hero-card-brand { font-size: 14px; font-weight: 700; letter-spacing: 1.5px; color: #ffffff; }
+    .hero-card-number { font-size: 15px; font-weight: 600; letter-spacing: 1.5px; color: rgba(255,255,255,0.95); }
+
+    /* ---------- QUICK ACTIONS ---------- */
+    .qa-label {
+        text-align: center; font-size: 12.5px; font-weight: 500; color: #c7cae3;
+        margin-top: 6px; display: block;
     }
-    
-    .logo-placeholder {
-        height: 20px;
-        background-color: #cbd5e1;
-        border-radius: 4px;
+    div[data-testid="column"] .qa-btn button {
+        width: 52px !important; height: 52px !important; border-radius: 50% !important;
+        background: var(--surface) !important; border: none !important;
+        font-size: 19px !important; display: flex !important; align-items: center; justify-content: center;
+        margin: 0 auto !important; padding: 0 !important;
     }
-    
-    /* Custom Streamlit component overrides */
+    div[data-testid="column"] .qa-btn button:hover { background: var(--surface-hover) !important; }
+    div[data-testid="column"] .qa-btn button:disabled { opacity: 0.35 !important; }
+    .qa-anchor {
+        width: 52px; height: 52px; border-radius: 50%; background: var(--surface);
+        display: flex; align-items: center; justify-content: center; font-size: 19px;
+        margin: 0 auto; text-decoration: none;
+    }
+    .qa-anchor:hover { background: var(--surface-hover); }
+
+    /* ---------- TODAY / SON BULUNANLAR LIST ---------- */
+    .today-title { font-size: 17px; font-weight: 600; margin: 0.5rem 0 1rem 0; color: #ffffff; }
+    .tx-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .tx-emoji { width: 40px; height: 40px; min-width: 40px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .tx-info { display: flex; flex-direction: column; flex: 1; line-height: 1.35; min-width: 0; }
+    .tx-name { font-size: 14.5px; font-weight: 500; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tx-time { font-size: 12.5px; font-weight: 400; color: var(--muted); }
+    .tx-amount { font-size: 15px; font-weight: 700; color: #ffffff; white-space: nowrap; }
+    .tx-amount.income { color: var(--green); }
+    .tx-row.upcoming { opacity: 0.45; }
+
+    /* ---------- BUTTONS ---------- */
     div.stButton > button {
         border-radius: 50px !important;
-        padding: 0.5rem 2rem !important;
+        padding: 0.6rem 1.6rem !important;
         font-weight: 600 !important;
-        background-color: #ffffff !important;
-        color: #0d0c10 !important;
-        border: 1px solid #dcdfe3 !important;
+        background-color: var(--surface) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
         transition: all 0.2s ease;
     }
-    
-    div.stButton > button:hover {
-        border-color: #0091ff !important;
-        color: #0091ff !important;
-    }
-    
-    /* Redefine Primary buttons */
+    div.stButton > button:hover { border-color: var(--pink) !important; color: var(--pink) !important; }
+
     .primary-btn div.stButton > button {
-        background-color: #0091ff !important;
-        color: #ffffff !important;
-        border: none !important;
+        background: linear-gradient(135deg, var(--violet) 0%, var(--pink) 100%) !important;
+        color: #ffffff !important; border: none !important;
     }
-    
-    .primary-btn div.stButton > button:hover {
-        background-color: #0077d6 !important;
-        color: #ffffff !important;
-    }
-    
-    /* Custom Card container for parameters */
+    .primary-btn div.stButton > button:hover { filter: brightness(1.08); }
+
+    /* ---------- PARAMETER CARD ---------- */
     .parameter-card {
-        background-color: #ffffff;
-        border: 1px solid #eaeaea;
-        border-radius: 12px;
+        background-color: var(--surface);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px;
         padding: 2rem;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.02);
         margin: 0 10%;
     }
-    
-    .parameter-header {
-        font-size: 20px;
-        font-weight: 600;
-        color: #0d0c10;
-        margin-bottom: 1.5rem;
-        border-bottom: 1px solid #eaeaea;
-        padding-bottom: 8px;
+    .parameter-header { font-size: 18px; font-weight: 600; color: #ffffff; margin-bottom: 1.5rem;
+        border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; }
+
+    /* Streamlit input widgets -> dark surfaces */
+    .stTextInput input, .stNumberInput input, div[data-baseweb="select"] > div, .stMultiSelect div[data-baseweb="select"] > div {
+        background-color: var(--navy) !important;
+        color: #ffffff !important;
+        border-color: rgba(255,255,255,0.1) !important;
     }
-    
-    /* Hide default Streamlit sidebar */
-    [data-testid="stSidebar"] {
-        display: none;
-    }
-    
+    label, .stMarkdown p { color: #c7cae3 !important; }
+    h1, h2, h3, h4 { color: #ffffff !important; }
+
     .new-listing {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        background: var(--navy);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 10px;
         padding: 1rem;
         margin-bottom: 1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
     }
-    
-    .new-listing b {
-        color: #0d0c10;
-    }
-    
-    /* Normal headings styling */
-    h3, h4 {
-        color: #0d0c10 !important;
-    }
+    .new-listing b { color: #ffffff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -236,100 +283,177 @@ if "scan_active" not in st.session_state:
 if "stop_event" not in st.session_state:
     st.session_state.stop_event = None
 
+df = load_data(engine)
+new_listings_df = df[df["is_new_listing"] == 1] if not df.empty else df
+total_value = df["price"].sum() if not df.empty else 0
+
 # ==========================================================================
-#  HERO SECTION (HTML Banner with Gradient Background)
+#  TOP BAR: GREETING + NOTIFICATION DOT + SPARKLINE
 # ==========================================================================
 
-# Code terminal values based on active state
-if st.session_state.scan_active:
-    status_comment = "Aktif Tarama Sürüyor... Arkanıza yaslanın, gerisini bize bırakın."
-    status_color = "#00a35c"
+hour = datetime.now().hour
+greeting_word = "Günaydın" if hour < 12 else ("İyi günler" if hour < 18 else "İyi akşamlar")
+
+if not df.empty:
+    site_counts = df["source_site"].value_counts()
+    bar_heights = [min(100, max(20, int(v / site_counts.max() * 100))) for v in site_counts.tolist()[:7]]
 else:
-    status_comment = "Sistem Aramaya Hazır. Lütfen hedeflerinizi belirleyin."
-    status_color = "#687076"
+    bar_heights = [30, 45, 35, 60, 40, 70, 55]
+sparkline_html = "".join(f'<span style="--h:{h}%"></span>' for h in bar_heights)
 
-# We split the page layout dynamically inside the custom gradient band
+notif_dot_html = '<span class="notif-dot"></span>' if len(new_listings_df) > 0 else ""
+
 st.markdown(f"""
-<div class="hero-container" style="text-align: center; padding: 6rem 10% 5rem 10%;">
-    <div style="max-width: 800px; margin: 0 auto;">
-        <div class="hero-headline" style="font-size: 56px;">Akıllı Araç Tedarik Altyapısı.</div>
-        <div class="hero-body" style="margin: 0 auto 2rem auto; font-size: 20px;">
-            Sizin belirlediğiniz kriterlere göre piyasadaki en uygun araçları tespit eder. 
-            Otoplus, VavaCars, Otokoç ve Arabam.com stoklarını saniyeler içinde tarar, 
-            yeni bir araç eklendiği an dikkatinizi dağıtmadan size bildirir.
-        </div>
-        <div style="display: inline-block; padding: 8px 20px; background-color: rgba(255,255,255,0.7); border-radius: 50px; font-weight: 600; font-size: 15px; color: {status_color}; border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
-            <span style="margin-right: 8px;">🎯</span> {status_comment}
-        </div>
+<div class="topbar">
+    <div>
+        <span class="greeting-hello">{greeting_word}</span>
+        <span class="greeting-name">Avcı Botu 🎯</span>
+    </div>
+    <div class="topbar-right">
+        <div class="sparkline">{sparkline_html}</div>
+        <div class="bell-wrap">🔔{notif_dot_html}</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 
 # ==========================================================================
-#  FOUR FEATURE COLUMNS
+#  BALANCE: TOPLAM TESPİT EDİLEN DEĞER
 # ==========================================================================
 
-st.markdown("<div style='padding: 0 10% 2rem 10%;'>", unsafe_allow_html=True)
-col1, col2, col3, col4 = st.columns(4)
+st.markdown(f"""
+<div class="balance-block">
+    <p class="balance-label">Toplam Tespit Edilen Değer</p>
+    <h1 class="balance-amount tnum">₺{format_try(total_value)}</h1>
+</div>
+""", unsafe_allow_html=True)
 
-with col1:
+
+# ==========================================================================
+#  HERO CARD (TILTED BRAND CARD)
+# ==========================================================================
+
+st.markdown(f"""
+<div class="hero-card-wrap">
+    <div class="hero-card">
+        <div class="hero-card-top">
+            <div class="chip"></div>
+            <span class="hero-card-brand">OTOGALERİ</span>
+        </div>
+        <div class="hero-card-number tnum">•••• {st.session_state.display_id}</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ==========================================================================
+#  QUICK ACTIONS: BAŞLAT / DURDUR / TEMİZLE / YENİLE
+# ==========================================================================
+
+qa1, qa2, qa3, qa4 = st.columns(4)
+
+with qa1:
+    st.markdown('<a class="qa-anchor" href="#hedef-arac-ozellikleri">▶️</a><span class="qa-label">Başlat</span>', unsafe_allow_html=True)
+
+with qa2:
+    st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
+    stop_clicked = st.button("⏹", key="qa_stop", disabled=not st.session_state.scan_active)
+    st.markdown('</div><span class="qa-label">Durdur</span>', unsafe_allow_html=True)
+    if stop_clicked:
+        st.session_state.scan_active = False
+        if st.session_state.stop_event:
+            st.session_state.stop_event.set()
+        st.rerun()
+
+with qa3:
+    st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
+    clear_clicked = st.button("🧹", key="qa_clear", disabled=df.empty)
+    st.markdown('</div><span class="qa-label">Temizle</span>', unsafe_allow_html=True)
+    if clear_clicked:
+        clear_all(engine)
+        st.rerun()
+
+with qa4:
+    st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
+    refresh_clicked = st.button("🔄", key="qa_refresh")
+    st.markdown('</div><span class="qa-label">Yenile</span>', unsafe_allow_html=True)
+    if refresh_clicked:
+        st.rerun()
+
+st.markdown("<div style='height: 2.5rem;'></div>", unsafe_allow_html=True)
+
+
+# ==========================================================================
+#  "SON BULUNANLAR" LİSTESİ
+# ==========================================================================
+
+st.markdown('<div style="padding: 0 10%;">', unsafe_allow_html=True)
+st.markdown('<p class="today-title">Son Bulunanlar</p>', unsafe_allow_html=True)
+
+SITE_EMOJI = {
+    "Otoplus": "🚗", "VavaCars": "🚙", "Otokoç 2. El": "🚘",
+    "Arabam.com": "🏎️", "Sahibinden": "🚓",
+}
+SITE_EMOJI_BG = {
+    "Otoplus": "#2a2140", "VavaCars": "#132a2a", "Otokoç 2. El": "#3a2418",
+    "Arabam.com": "#173021", "Sahibinden": "#242742",
+}
+
+if not df.empty:
+    recent = df.sort_values("scraped_at", ascending=False).head(6)
+    for _, row in recent.iterrows():
+        emoji = SITE_EMOJI.get(row["source_site"], "🚘")
+        bg = SITE_EMOJI_BG.get(row["source_site"], "#242742")
+        is_new = row.get("is_new_listing", 0) == 1
+        amount_class = "tx-amount income tnum" if is_new else "tx-amount tnum"
+        sign = "+" if is_new else "-"
+        try:
+            time_str = row["scraped_at"].strftime("%H:%M") if row["scraped_at"] else "--:--"
+        except Exception:
+            time_str = "--:--"
+        st.markdown(f"""
+        <div class="tx-row">
+            <span class="tx-emoji" style="background:{bg}">{emoji}</span>
+            <div class="tx-info">
+                <span class="tx-name">{row['brand']} {row['model']}</span>
+                <span class="tx-time">{row['source_site']} · {time_str}</span>
+            </div>
+            <span class="{amount_class}">{sign}₺{format_try(row['price'])}</span>
+        </div>
+        """, unsafe_allow_html=True)
+else:
     st.markdown("""
-    <div class="feature-card">
-        <div class="feature-icon-tile" style="background: linear-gradient(135deg, #a0c4ff, #c8b6ff);">🔄</div>
-        <div class="feature-title">Eşzamanlı Tarama</div>
-        <div class="feature-text">Tüm platformları tek bir akışta birleştirerek anlık veri sağlar.</div>
+    <div class="tx-row" style="border-bottom:none;">
+        <div class="tx-info">
+            <span class="tx-name">Henüz araç bulunamadı</span>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-with col2:
-    st.markdown("""
-    <div class="feature-card">
-        <div class="feature-icon-tile" style="background: linear-gradient(135deg, #bdf0e0, #a0c4ff);">📈</div>
-        <div class="feature-title">Hızlı Bildirim</div>
-        <div class="feature-text">Kriterlerinize uyan bir araç ilana düştüğü an masaüstü bildirimi alırsınız.</div>
-    </div>
-    """, unsafe_allow_html=True)
+if st.session_state.scan_active:
+    upcoming_text = f"Sıradaki tarama ~{SCRAPER_CYCLE_INTERVAL_SEC} saniye içinde"
+else:
+    upcoming_text = "Tarama başlatıldığında burada görünecek"
 
-with col3:
-    st.markdown("""
-    <div class="feature-card">
-        <div class="feature-icon-tile" style="background: linear-gradient(135deg, #c8b6ff, #fffdd0);">🛡️</div>
-        <div class="feature-title">Hasar Koruması</div>
-        <div class="feature-text">Gelişmiş NLP filtresi ile istemediğiniz boya veya değişenleri otomatik eler.</div>
+st.markdown(f"""
+<div class="tx-row upcoming">
+    <span class="tx-emoji" style="background:#242742">⏱️</span>
+    <div class="tx-info">
+        <span class="tx-name">Sıradaki Tarama</span>
+        <span class="tx-time">{upcoming_text}</span>
     </div>
-    """, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
 
-with col4:
-    st.markdown("""
-    <div class="feature-card">
-        <div class="feature-icon-tile" style="background: linear-gradient(135deg, #fffdd0, #bdf0e0);">🧠</div>
-        <div class="feature-title">Psikolojik Rahatlık</div>
-        <div class="feature-text">Siz işininize odaklanın, manuel ilan arama stresini bot devralsın.</div>
-    </div>
-    """, unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ==========================================================================
-#  LOGO STRIP OF NEUTRAL PLACEHOLDER BARS
-# ==========================================================================
-
-st.markdown("""
-<div class="logo-strip">
-    <div class="logo-placeholder" style="width: 110px;"></div>
-    <div class="logo-placeholder" style="width: 90px;"></div>
-    <div class="logo-placeholder" style="width: 130px;"></div>
-    <div class="logo-placeholder" style="width: 85px;"></div>
-    <div class="logo-placeholder" style="width: 100px;"></div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("<div style='height: 2.5rem;'></div>", unsafe_allow_html=True)
 
 
 # ==========================================================================
 #  PARAMETER CARD (THE PARAMETER FORM)
 # ==========================================================================
 
+st.markdown('<div id="hedef-arac-ozellikleri"></div>', unsafe_allow_html=True)
 st.markdown('<div class="parameter-card">', unsafe_allow_html=True)
 
 # Form header
@@ -392,7 +516,7 @@ target_sites = st.multiselect(
 
 # Allowed damages config
 st.markdown("<br><b>🚘 İnteraktif Araç Hasar Haritası</b>", unsafe_allow_html=True)
-st.markdown("<p style='font-size: 13px; color: #687076;'>Aşağıdaki şemada araç parçalarına tıklayarak izin verdiğiniz maksimum hasar durumunu seçin (Gri: Orijinal, Mavi: Boyalı, Kırmızı: Değişen).</p>", unsafe_allow_html=True)
+st.markdown("<p style='font-size: 13px; color: var(--muted);'>Aşağıdaki şemada araç parçalarına tıklayarak izin verdiğiniz maksimum hasar durumunu seçin (Gri: Orijinal, Mavi: Boyalı, Kırmızı: Değişen).</p>", unsafe_allow_html=True)
 
 import streamlit.components.v1 as components
 car_map = components.declare_component("car_map", path="car_map_component")
@@ -473,13 +597,10 @@ st.markdown('<div style="margin: 3rem 10% 0 10%;">', unsafe_allow_html=True)
 
 st.markdown('<h3>📊 Bulunan Araçlar</h3>', unsafe_allow_html=True)
 
-df = load_data(engine)
-
 if not df.empty:
-    new_listings = df[df["is_new_listing"] == 1]
-    if not new_listings.empty:
-        st.markdown(f"#### 🚨 YENİ YAKALANAN ARAÇLAR ({len(new_listings)} ilan)")
-        for idx, row in new_listings.iterrows():
+    if not new_listings_df.empty:
+        st.markdown(f"#### 🚨 YENİ YAKALANAN ARAÇLAR ({len(new_listings_df)} ilan)")
+        for idx, row in new_listings_df.iterrows():
             badge_color = (
                 "#ff4b4b" if row['source_site'] == "Otoplus"
                 else ("#1e90ff" if row['source_site'] == "VavaCars" else "#ffa500")
@@ -488,11 +609,11 @@ if not df.empty:
             <div class="new-listing">
                 <span style="background:{badge_color}; color:#ffffff; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; margin-right:10px;">{row['source_site']}</span>
                 <b>{row['brand']} {row['model']} {row['package_trim']}</b> ({row['year']} | {row['km']} km) -
-                <span style="color:#00c0a0; font-size:18px;"><b>{row['price']:,} ₺</b></span>
+                <span class="tnum" style="color: var(--green); font-size:18px;">₺{format_try(row['price'])}</span>
                 <br>
-                <small style="color: #687076;">Boya: {row['painted_parts']} | Değişen: {row['changed_parts']} | Tramer: {row['tramer_fee']} ₺</small>
+                <small style="color: var(--muted);">Boya: {row['painted_parts']} | Değişen: {row['changed_parts']} | Tramer: {row['tramer_fee']} ₺</small>
                 <br>
-                <a href="{row['link']}" target="_blank" style="color:#0091ff; font-size:12px; font-weight: 500;">İlana Git ↗</a>
+                <a href="{row['link']}" target="_blank" style="color:var(--pink); font-size:12px; font-weight: 500;">İlana Git ↗</a>
             </div>
             """, unsafe_allow_html=True)
         st.divider()
@@ -516,7 +637,7 @@ if not df.empty:
             "tramer_fee": st.column_config.NumberColumn("Tramer (TL)", format="%d ₺")
         }
     )
-    
+
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🗑️ Tüm Veritabanını Temizle (Bulunan Araçları Sil)"):
         clear_all(engine)

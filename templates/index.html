@@ -1,88 +1,141 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Award-Winning Creative Agency</title>
+    <title>NOVA</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;1,600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <!-- Background Drifting Orbs -->
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
+    <div class="page">
+        <div class="phone">
 
-    <!-- Main Content Layer -->
-    <div class="content-wrapper">
-        <!-- Navigation -->
-        <nav class="navbar">
-            <div class="logo">AGENCY</div>
-            <div class="nav-links">
-                <a href="#">WORK</a>
-                <a href="#">STUDIO</a>
-                <a href="#">SERVICES</a>
-                <a href="http://localhost:8501" target="_blank">DASHBOARD</a>
-                <a href="#">CONTACT</a>
-            </div>
-        </nav>
-
-        <!-- Hero Section -->
-        <main class="hero">
-            <p class="eyebrow">DIGITAL EXCELLENCE</p>
-            <h1 class="headline">We build immersive <br> digital <em>experiences</em></h1>
-            <p class="sub-headline">Merging strategic design with cutting-edge engineering to create<br>award-winning interactive platforms for forward-thinking brands.</p>
-            
-            <div class="pill-buttons">
-                <a href="http://localhost:8501" target="_blank" class="pill-btn primary">📊 Dashboard'a Git</a>
-                <a href="#" class="pill-btn">Our Approach</a>
-            </div>
-        </main>
-
-        <!-- Marquee Strip -->
-        <div class="marquee-strip">
-            <div class="marquee-content">
-                BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot; BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot;
-            </div>
-            <!-- Duplicate for seamless looping -->
-            <div class="marquee-content">
-                BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot; BRAND IDENTITY &middot; MOTION DESIGN &middot; WEB EXPERIENCE &middot; VISUAL STRATEGY &middot; CREATIVE DIRECTION &middot; ART DIRECTION &middot; INTERACTION &middot;
-            </div>
-        </div>
-
-        <!-- Video Placeholder -->
-        <div class="video-container">
-            <div class="cinematic-sweep"></div>
-            <div class="video-overlay"></div>
-            <div class="play-button-wrapper">
-                <div class="play-button">
-                    <svg viewBox="0 0 24 24" width="24" height="24" fill="rgba(255,255,255,0.85)"><path d="M8 5v14l11-7z"/></svg>
+            <!-- Top bar -->
+            <header class="topbar">
+                <div class="greeting">
+                    <span class="greeting-hello">Günaydın</span>
+                    <span class="greeting-name">Mert 👋</span>
                 </div>
-                <div class="showreel-label">SHOWREEL 2025</div>
-            </div>
+                <div class="topbar-right">
+                    <div class="sparkline" aria-hidden="true">
+                        <span style="--h:35%"></span>
+                        <span style="--h:55%"></span>
+                        <span style="--h:40%"></span>
+                        <span style="--h:70%"></span>
+                        <span style="--h:50%"></span>
+                        <span style="--h:85%"></span>
+                        <span style="--h:65%"></span>
+                    </div>
+                    <button class="bell-btn" type="button" aria-label="Bildirimler">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 3C9.24 3 7 5.24 7 8v3.6c0 .5-.2 1-.55 1.36L5 14.5c-.6.6-.17 1.6.66 1.6h12.68c.83 0 1.26-1 .66-1.6l-1.45-1.54A1.9 1.9 0 0 1 17 11.6V8c0-2.76-2.24-5-5-5Z" stroke="#8a8fb8" stroke-width="1.6" stroke-linejoin="round"/>
+                            <path d="M9.5 18a2.5 2.5 0 0 0 5 0" stroke="#8a8fb8" stroke-width="1.6" stroke-linecap="round"/>
+                        </svg>
+                        <span class="notif-dot"></span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Balance -->
+            <section class="balance-block">
+                <p class="balance-label">Toplam Bakiye</p>
+                <h1 class="balance-amount">₺12.480,50</h1>
+            </section>
+
+            <!-- Hero bank card -->
+            <section class="hero-card-wrap">
+                <div class="hero-card">
+                    <div class="hero-card-top">
+                        <div class="chip"></div>
+                        <span class="hero-card-brand">NOVA</span>
+                    </div>
+                    <div class="hero-card-number">•••• 4821</div>
+                </div>
+            </section>
+
+            <!-- Quick actions -->
+            <section class="quick-actions">
+                <button class="qa" type="button">
+                    <span class="qa-circle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12h15M13 6l6 6-6 6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="qa-label">Gönder</span>
+                </button>
+                <button class="qa" type="button">
+                    <span class="qa-circle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M20 12H5M11 6l-6 6 6 6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="qa-label">İste</span>
+                </button>
+                <button class="qa" type="button">
+                    <span class="qa-circle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 7h11M7 7l3-3M7 7l3 3M17 17H6M17 17l-3 3M17 17l-3-3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="qa-label">Döviz</span>
+                </button>
+                <button class="qa" type="button">
+                    <span class="qa-circle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M6 6.5l12 11M18 6.5l-12 11" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="qa-label">Dondur</span>
+                </button>
+            </section>
+
+            <!-- Today list -->
+            <section class="today">
+                <h2 class="today-title">Bugün</h2>
+
+                <div class="tx-row">
+                    <span class="tx-emoji" style="background:#2a2140">🛒</span>
+                    <div class="tx-info">
+                        <span class="tx-name">Migros</span>
+                        <span class="tx-time">10:24</span>
+                    </div>
+                    <span class="tx-amount">-₺284,90</span>
+                </div>
+
+                <div class="tx-row">
+                    <span class="tx-emoji" style="background:#3a2418">☕</span>
+                    <div class="tx-info">
+                        <span class="tx-name">Kahve Dünyası</span>
+                        <span class="tx-time">09:07</span>
+                    </div>
+                    <span class="tx-amount">-₺76,00</span>
+                </div>
+
+                <div class="tx-row">
+                    <span class="tx-emoji" style="background:#132a2a">🚕</span>
+                    <div class="tx-info">
+                        <span class="tx-name">BiTaksi</span>
+                        <span class="tx-time">08:41</span>
+                    </div>
+                    <span class="tx-amount">-₺142,50</span>
+                </div>
+
+                <div class="tx-row">
+                    <span class="tx-emoji" style="background:#173021">💼</span>
+                    <div class="tx-info">
+                        <span class="tx-name">Maaş</span>
+                        <span class="tx-time">08:00</span>
+                    </div>
+                    <span class="tx-amount income">+₺1.250,00</span>
+                </div>
+
+                <div class="tx-row upcoming">
+                    <span class="tx-emoji" style="background:#242742">🏠</span>
+                    <div class="tx-info">
+                        <span class="tx-name">Kira</span>
+                        <span class="tx-time">Yarın</span>
+                    </div>
+                    <span class="tx-amount">-₺9.500,00</span>
+                </div>
+            </section>
         </div>
 
-        <!-- Stats Bar -->
-        <div class="stats-row">
-            <div class="stat-col">
-                <div class="stat-number">{{ total_vehicles if total_vehicles else '0' }}</div>
-                <div class="stat-label">Vehicles Scraped</div>
-            </div>
-            <div class="stat-col">
-                <div class="stat-number">38</div>
-                <div class="stat-label">Awards Won</div>
-            </div>
-            <div class="stat-col">
-                <div class="stat-number">12</div>
-                <div class="stat-label">Years Active</div>
-            </div>
-            <div class="stat-col">
-                <div class="stat-number">6</div>
-                <div class="stat-label">Continents</div>
-            </div>
-        </div>
+        <a class="dashboard-link" href="http://localhost:8501" target="_blank">Tarama panelini aç →</a>
     </div>
 </body>
 </html>
