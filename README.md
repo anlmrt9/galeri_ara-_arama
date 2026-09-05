@@ -30,7 +30,8 @@ Belirlediğiniz kriterlere (marka, model, fiyat, yıl, kilometre, tramer) uyan i
 | `static/offline.html` | Bağlantı yokken gösterilen çevrimdışı bilgilendirme ekranı. |
 | `static/splash/` | iOS "Ana Ekrana Ekle" sonrası açılışta gösterilen marka splash görselleri. |
 | `api.py` | Mobil uygulamanın konuştuğu FastAPI backend'i (aynı `config`/`db`/`scrapers` mantığını REST üzerinden sunar). |
-| `mobile/` | Expo (React Native) ile yazılmış gerçek mobil uygulama; `api.py`'ye HTTP ile bağlanır. |
+
+> **Not:** Expo (React Native) ile yazılmış gerçek mobil uygulama artık bu repoda değil, ayrı bir klasöre taşındı: `../otogaleri-mobile` (bu projeyle kardeş klasör). `api.py`'ye HTTP ile bağlanır.
 
 ## Gereksinimler
 
@@ -111,7 +112,7 @@ Bilgisayarınızın yerel ağ IP adresini öğrenin (Windows'ta `ipconfig` → "
 ### 2. Mobil uygulamayı çalıştırın
 
 ```bash
-cd mobile
+cd ../otogaleri-mobile   # ayrı klasöre taşındı
 npm install   # ilk seferde
 npx expo start
 ```
