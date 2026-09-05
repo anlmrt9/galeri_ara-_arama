@@ -2,93 +2,99 @@
 api.py - OtoGaleri Avcı Botu REST API
 ======================================
 Mobil (Expo/React Native) uygulamanın konuştuğu FastAPI backend'i.
-İş mantığı tamamen config.py/db.py/scrapers.py/notifications.py içinde;
+İş mantığı config.py / db.py / scrapers.py / scan_service.py içinde;
 bu dosya yalnızca ince bir HTTP katmanıdır. Streamlit arayüzü (app.py)
-bu dosyadan bağımsız olarak, aynı veritabanı üzerinde çalışmaya devam eder.
+bu dosyadan bağımsız olarak, aynı veritabanı üzerinde çalışır.
 
 Çalıştırma:
     python -m uvicorn api:app --host 0.0.0.0 --port 8000
+
+Kimlik doğrulama:
+    OTOGALERI_API_KEY tanımlıysa yazma uçları (start/stop/temizle) ve liste
+    uçları ``X-API-Key`` başlığını zorunlu kılar. Boşsa auth kapalıdır
+    (yalnızca güvenli yerel ağ senaryosu için).
 """
 
+from __future__ import annotations
+
 import math
-import threading
-import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
-from config import ALL_SITES, SCRAPER_CYCLE_INTERVAL_SEC, CAR_CATALOG, DAMAGE_PARTS
-from db import get_engine, init_tables, load_data, mark_all_as_seen, clear_all
+from config import CAR_CATALOG, DAMAGE_PARTS, settings
+from db import clear_all, get_engine, init_tables, load_data
 from logger_setup import logger
-from scrapers import run_one_cycle
+from scan_service import ScanAlreadyRunningError, ScanCriteria, ScanManager
 
-ENGINE = None
-SCAN_LOCK = threading.Lock()
-SCAN_JOB: Optional[dict] = None  # {"session_id", "stop_event", "started_at", "thread"}
+_state: dict[str, Any] = {"engine": None}
+
+
+def _get_engine() -> Any:
+    return _state["engine"]
+
+
+scan_manager = ScanManager(_get_engine, label="API")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    global ENGINE
-    ENGINE = get_engine()
-    if ENGINE:
-        init_tables(ENGINE)
-    yield
+async def lifespan(_: FastAPI):
+    engine = get_engine()
+    _state["engine"] = engine
+    if engine:
+        init_tables(engine)
+    else:
+        logger.error("[API] Veritabani baglantisi kurulamadi — uclar 503 donecek.")
+    try:
+        yield
+    finally:
+        scan_manager.shutdown()
 
 
-app = FastAPI(title="OtoGaleri Avcı Botu API", lifespan=lifespan)
+app = FastAPI(title="OtoGaleri Avcı Botu API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 
-class ScanCriteria(BaseModel):
-    sites: list[str] = Field(default_factory=lambda: list(ALL_SITES))
-    brand: str = "Tümü"
-    model: str = "Tümü"
-    min_price: float = 0
-    max_price: float = 999999999
-    min_year: int = 1970
-    max_year: int = 2030
-    min_km: float = 0
-    max_km: float = 1000000
-    max_tramer: float = 999999999
-    duration_hours: float = 24.0
-    allowed_parts: list[str] = Field(default_factory=list)
+# ==========================================================================
+#  KİMLİK DOĞRULAMA
+# ==========================================================================
 
 
-def background_scan_thread(engine, criteria, stop_event, session_id):
-    """app.py'deki background_scan_thread ile aynı döngü (Streamlit'e bağımlı değil)."""
-    logger.info(f"[API] Yeni tarama oturumu basladi: {session_id}")
-
-    duration_hours = criteria["duration"]
-    end_time = datetime.now() + timedelta(hours=duration_hours)
-
-    mark_all_as_seen(engine)
-
-    while datetime.now() < end_time:
-        if stop_event.is_set():
-            logger.info("[API] Tarama stop_event ile durduruldu.")
-            break
-        run_one_cycle(engine, criteria, session_id=session_id)
-        stop_event.wait(timeout=SCRAPER_CYCLE_INTERVAL_SEC)
-
-    logger.info("[API] Tarama dongusu tamamlandi.")
-    with SCAN_LOCK:
-        global SCAN_JOB
-        if SCAN_JOB and SCAN_JOB.get("session_id") == session_id:
-            SCAN_JOB = None
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """OTOGALERI_API_KEY tanımlıysa ``X-API-Key`` başlığını doğrular."""
+    expected = settings.api_key
+    if not expected:
+        return  # auth kapalı
+    if x_api_key != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Geçersiz veya eksik API anahtarı"
+        )
 
 
-def _clean_value(v):
+def require_engine() -> Any:
+    engine = _state["engine"]
+    if engine is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Veritabanına bağlanılamadı"
+        )
+    return engine
+
+
+# ==========================================================================
+#  YARDIMCILAR
+# ==========================================================================
+
+
+def _clean_value(v: Any) -> Any:
     if isinstance(v, float) and math.isnan(v):
         return None
     if hasattr(v, "isoformat"):
@@ -96,109 +102,67 @@ def _clean_value(v):
     return v
 
 
-def _serialize_listings(df):
+def _serialize_listings(df: Any) -> list[dict[str, Any]]:
     if df is None or df.empty:
         return []
-    records = df.to_dict(orient="records")
-    return [{k: _clean_value(v) for k, v in row.items()} for row in records]
+    return [{k: _clean_value(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
+
+
+# ==========================================================================
+#  UÇLAR
+# ==========================================================================
 
 
 @app.get("/api/health")
-def health():
-    return {"db_connected": ENGINE is not None}
+def health() -> dict[str, Any]:
+    return {"db_connected": _state["engine"] is not None}
 
 
 @app.get("/api/config")
-def get_config():
+def get_config() -> dict[str, Any]:
     return {
-        "sites": ALL_SITES,
-        "cycle_interval_sec": SCRAPER_CYCLE_INTERVAL_SEC,
+        "sites": list(ScanCriteria().sites),
+        "cycle_interval_sec": settings.scraper_cycle_interval_sec,
         "catalog": CAR_CATALOG,
         "damage_parts": DAMAGE_PARTS,
     }
 
 
-@app.get("/api/listings")
-def get_listings():
-    if not ENGINE:
-        raise HTTPException(status_code=503, detail="Veritabanına bağlanılamadı")
-    df = load_data(ENGINE)
-    listings = _serialize_listings(df)
+@app.get("/api/listings", dependencies=[Depends(require_api_key)])
+def get_listings(engine: Any = Depends(require_engine)) -> dict[str, Any]:
+    listings = _serialize_listings(load_data(engine))
     new_count = sum(1 for row in listings if row.get("is_new_listing") in (1, True))
     return {"listings": listings, "total": len(listings), "new_count": new_count}
 
 
-@app.delete("/api/listings")
-def delete_listings():
-    if not ENGINE:
-        raise HTTPException(status_code=503, detail="Veritabanına bağlanılamadı")
-    clear_all(ENGINE)
+@app.delete("/api/listings", dependencies=[Depends(require_api_key)])
+def delete_listings(engine: Any = Depends(require_engine)) -> dict[str, bool]:
+    clear_all(engine)
     return {"ok": True}
 
 
-@app.get("/api/scan/status")
-def scan_status():
-    with SCAN_LOCK:
-        if not SCAN_JOB:
-            return {"active": False}
-        return {
-            "active": True,
-            "session_id": SCAN_JOB["session_id"],
-            "started_at": SCAN_JOB["started_at"].isoformat(),
-        }
+@app.get("/api/scan/status", dependencies=[Depends(require_api_key)])
+def scan_status() -> dict[str, Any]:
+    return scan_manager.status()
 
 
-@app.post("/api/scan/start")
-def scan_start(criteria: ScanCriteria):
-    if not ENGINE:
-        raise HTTPException(status_code=503, detail="Veritabanına bağlanılamadı")
-
-    global SCAN_JOB
-    with SCAN_LOCK:
-        if SCAN_JOB is not None:
-            raise HTTPException(status_code=409, detail="Zaten aktif bir tarama var")
-
-        stop_event = threading.Event()
-        session_id = str(uuid.uuid4())
-        criteria_dict = {
-            "sites": criteria.sites,
-            "brand": criteria.brand,
-            "model": criteria.model,
-            "min_price": criteria.min_price,
-            "max_price": criteria.max_price,
-            "min_year": criteria.min_year,
-            "max_year": criteria.max_year,
-            "min_km": criteria.min_km,
-            "max_km": criteria.max_km,
-            "max_tramer": criteria.max_tramer,
-            "duration": criteria.duration_hours,
-            "allowed_parts": criteria.allowed_parts,
-        }
-
-        def runner():
-            background_scan_thread(ENGINE, criteria_dict, stop_event, session_id)
-
-        thread = threading.Thread(target=runner, daemon=True)
-        SCAN_JOB = {
-            "session_id": session_id,
-            "stop_event": stop_event,
-            "started_at": datetime.now(),
-            "thread": thread,
-        }
-        thread.start()
-
+@app.post("/api/scan/start", dependencies=[Depends(require_api_key)])
+def scan_start(criteria: ScanCriteria, _: Any = Depends(require_engine)) -> dict[str, str]:
+    try:
+        session_id = scan_manager.start(criteria)
+    except ScanAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
     return {"session_id": session_id}
 
 
-@app.post("/api/scan/stop")
-def scan_stop():
-    global SCAN_JOB
-    with SCAN_LOCK:
-        if not SCAN_JOB:
-            return {"ok": True, "was_active": False}
-        SCAN_JOB["stop_event"].set()
-        SCAN_JOB = None
-    return {"ok": True, "was_active": True}
+@app.post("/api/scan/stop", dependencies=[Depends(require_api_key)])
+def scan_stop() -> dict[str, bool]:
+    was_active = scan_manager.stop()
+    return {"ok": True, "was_active": was_active}
 
 
 if __name__ == "__main__":

@@ -6,27 +6,63 @@ DATABASE_URL varsa PostgreSQL, yoksa SQL Server kullanılır.
 Connection pool, retry dekoratörü ve checkpoint (scan_sessions) burada.
 """
 
-import time
 import platform
-import pandas as pd
+import re
+import time
 from functools import wraps
+
+import pandas as pd
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.exc import (
+    DBAPIError,
+    IntegrityError,
+    InterfaceError,
+    OperationalError,
+    ProgrammingError,
+)
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
 from config import (
-    DATABASE_URL, DB_SERVER, DB_NAME,
-    DB_CONNECTION_POOL_SIZE, DB_CONNECTION_MAX_OVERFLOW,
-    DB_CONNECTION_RECYCLE_SECONDS, DB_QUERY_TIMEOUT,
-    RETRY_MAX_ATTEMPTS, RETRY_BACKOFF_FACTOR,
+    DATABASE_URL,
+    DB_CONNECTION_MAX_OVERFLOW,
+    DB_CONNECTION_POOL_SIZE,
+    DB_CONNECTION_RECYCLE_SECONDS,
+    DB_NAME,
+    DB_QUERY_TIMEOUT,
+    DB_SERVER,
+    RETRY_BACKOFF_FACTOR,
+    RETRY_MAX_ATTEMPTS,
 )
 from logger_setup import logger
 
+# ==========================================================================
+#  @retry_on_db_error Dekoratörü
+# ==========================================================================
 
-# ==========================================================================
-#  GÖREV 1: @retry_on_db_error Dekoratörü
-# ==========================================================================
+# Yalnızca geçici (transient) bağlantı/zaman aşımı hataları yeniden denenir.
+_TRANSIENT_DB_ERRORS = (OperationalError, SQLAlchemyTimeoutError, InterfaceError)
+# Bunlar kalıcı programlama/veri hatalarıdır — tekrar denemek anlamsızdır
+# (ör. aynı listing_id'yi ikinci kez INSERT etmek IntegrityError verir).
+_NON_RETRYABLE_DB_ERRORS = (IntegrityError, ProgrammingError)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, _NON_RETRYABLE_DB_ERRORS):
+        return False
+    if isinstance(exc, _TRANSIENT_DB_ERRORS):
+        return True
+    # Bağlantı geçersiz kılınmış bir DBAPIError ise (kopan bağlantı) denenebilir.
+    if isinstance(exc, DBAPIError):
+        return bool(getattr(exc, "connection_invalidated", False))
+    return False
+
 
 def retry_on_db_error(max_retries=None, backoff_factor=None):
-    """Veritabanı işleminde hata olursa exponential backoff ile tekrar."""
+    """Geçici veritabanı hatalarında exponential backoff ile tekrar dener.
+
+    Kalıcı hatalar (IntegrityError, ProgrammingError, beklenmeyen tipler) anında
+    yükseltilir; boşuna bekleme yapılmaz.
+    """
     if max_retries is None:
         max_retries = RETRY_MAX_ATTEMPTS
     if backoff_factor is None:
@@ -39,18 +75,24 @@ def retry_on_db_error(max_retries=None, backoff_factor=None):
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
-                except (OperationalError, SQLAlchemyTimeoutError, Exception) as e:
+                except Exception as e:  # noqa: BLE001 - sınıflandırıp yeniden yükseltiyoruz
+                    if not _is_retryable(e):
+                        raise
                     last_exception = e
                     if attempt < max_retries - 1:
-                        wait_time = 1 * (backoff_factor ** attempt)
+                        wait_time = 1 * (backoff_factor**attempt)
                         logger.warning(
-                            f"[DB Retry] {func.__name__} denemesi {attempt+1}/{max_retries} basarisiz, "
-                            f"{wait_time:.0f}s bekleniyor: {str(e)[:100]}"
+                            f"[DB Retry] {func.__name__} denemesi {attempt + 1}/{max_retries} "
+                            f"basarisiz, {wait_time:.0f}s bekleniyor: {str(e)[:100]}"
                         )
                         time.sleep(wait_time)
-            logger.error(f"[DB Retry] {func.__name__} tum {max_retries} deneme basarisiz: {last_exception}")
+            logger.error(
+                f"[DB Retry] {func.__name__} tum {max_retries} deneme basarisiz: {last_exception}"
+            )
             raise last_exception
+
         return wrapper
+
     return decorator
 
 
@@ -58,25 +100,38 @@ def retry_on_db_error(max_retries=None, backoff_factor=None):
 #  DB INIT — hem PostgreSQL hem SQL Server destekli
 # ==========================================================================
 
+
 def _is_postgresql(engine) -> bool:
     return engine.dialect.name == "postgresql"
 
 
+_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def _create_mssql_db_if_needed():
-    """Sadece Windows/lokalde: SQL Server'da OtoGaleriDB yoksa oluşturur."""
+    """Sadece Windows/lokalde: SQL Server'da hedef veritabanı yoksa oluşturur."""
     if platform.system() != "Windows":
+        return
+    if not _SQL_IDENTIFIER_RE.match(DB_NAME):
+        logger.error(
+            f"Gecersiz veritabani adi ({DB_NAME!r}); yalnizca harf/rakam/alt cizgi "
+            "kabul edilir. Olusturma atlandi."
+        )
         return
     try:
         import pyodbc
+
         conn_str = (
-            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            "DRIVER={ODBC Driver 17 for SQL Server};"
             f"SERVER={DB_SERVER};DATABASE=master;Trusted_Connection=yes;autocommit=True"
         )
         conn = pyodbc.connect(conn_str, autocommit=True)
         cursor = conn.cursor()
-        cursor.execute(f"SELECT name FROM sys.databases WHERE name = N'{DB_NAME}'")
+        # Ad sorguya parametreyle verilir; CREATE DATABASE parametre kabul etmediği
+        # için identifier yukarıda regex ile doğrulandı.
+        cursor.execute("SELECT name FROM sys.databases WHERE name = ?", DB_NAME)
         if not cursor.fetchone():
-            cursor.execute(f"CREATE DATABASE {DB_NAME}")
+            cursor.execute(f"CREATE DATABASE [{DB_NAME}]")
             logger.info(f"{DB_NAME} veritabani olusturuldu.")
         conn.close()
     except Exception as e:
@@ -182,7 +237,10 @@ def init_tables(engine):
             else:
                 # --- SQL Server ---
                 conn.execute(text("""
-                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Cars' AND xtype='U')
+                IF NOT EXISTS (
+                    SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_NAME = 'Cars' AND TABLE_TYPE = 'BASE TABLE'
+                )
                 BEGIN
                     CREATE TABLE Cars (
                         id INT IDENTITY(1,1) PRIMARY KEY,
@@ -206,7 +264,10 @@ def init_tables(engine):
                 END
                 """))
                 conn.execute(text("""
-                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='scan_sessions' AND xtype='U')
+                IF NOT EXISTS (
+                    SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_NAME = 'scan_sessions' AND TABLE_TYPE = 'BASE TABLE'
+                )
                 BEGIN
                     CREATE TABLE scan_sessions (
                         id INT IDENTITY(1,1) PRIMARY KEY,
@@ -230,6 +291,7 @@ def init_tables(engine):
 #  CRUD — Cars
 # ==========================================================================
 
+
 def load_data(engine):
     """Cars tablosundaki tüm verileri DataFrame olarak döndürür."""
     if not engine:
@@ -251,10 +313,12 @@ def listing_exists(engine, listing_id):
     """Verilen listing_id veritabanında mevcut mu kontrol eder. DB hatası olursa otomatik retry."""
     try:
         with engine.connect() as conn:
-            return conn.execute(
-                text("SELECT 1 FROM Cars WHERE listing_id=:id"),
-                {"id": listing_id}
-            ).scalar() is not None
+            return (
+                conn.execute(
+                    text("SELECT 1 FROM Cars WHERE listing_id=:id"), {"id": listing_id}
+                ).scalar()
+                is not None
+            )
     except Exception as e:
         logger.error(f"listing_exists sorgu hatasi: {e}")
         raise
@@ -265,14 +329,17 @@ def insert_car(engine, car_data):
     """Yeni araç kaydını veritabanına ekler. DB hatası olursa otomatik retry."""
     try:
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO Cars (listing_id, source_site, brand, model, package_trim,
                     engine_power, year, km, price, location, tramer_fee,
                     painted_parts, changed_parts, link, scraped_at, is_new_listing)
                 VALUES (:listing_id, :source_site, :brand, :model, :package_trim,
                     :engine_power, :year, :km, :price, :location, :tramer_fee,
                     :painted_parts, :changed_parts, :link, :scraped_at, :is_new_listing)
-            """), car_data)
+            """),
+                car_data,
+            )
         return True
     except Exception as e:
         logger.error(f"Arac ekleme hatasi (listing_id={car_data.get('listing_id')}): {e}")
@@ -281,16 +348,13 @@ def insert_car(engine, car_data):
 
 def mark_all_as_seen(engine):
     """Tüm ilanları 'görüldü' (is_new_listing=False) olarak işaretler."""
+    # PostgreSQL BOOLEAN 'FALSE' bekler, SQL Server BIT '0' bekler.
+    value_sql = "FALSE" if _is_postgresql(engine) else "0"
     try:
         with engine.begin() as conn:
-            conn.execute(text("UPDATE Cars SET is_new_listing = FALSE"))
-    except Exception:
-        # SQL Server için BIT 0 kullan
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("UPDATE Cars SET is_new_listing = 0"))
-        except Exception as e:
-            logger.error(f"mark_all_as_seen hatasi: {e}")
+            conn.execute(text(f"UPDATE Cars SET is_new_listing = {value_sql}"))
+    except Exception as e:
+        logger.error(f"mark_all_as_seen hatasi: {e}")
 
 
 def clear_all(engine):
@@ -306,6 +370,7 @@ def clear_all(engine):
 #  GÖREV 2: Checkpoint Fonksiyonları (scan_sessions) — dialect-agnostic
 # ==========================================================================
 
+
 def _now_sql(engine) -> str:
     """Dialect'e göre NOW() veya GETDATE() döndürür."""
     return "NOW()" if _is_postgresql(engine) else "GETDATE()"
@@ -316,8 +381,10 @@ def get_or_create_session(engine, session_id: str, site_name: str) -> dict:
     try:
         with engine.connect() as conn:
             result = conn.execute(
-                text("SELECT last_page_index, last_listing_id, status FROM scan_sessions WHERE session_id=:sid AND site_name=:site"),
-                {"sid": session_id, "site": site_name}
+                text(
+                    "SELECT last_page_index, last_listing_id, status FROM scan_sessions WHERE session_id=:sid AND site_name=:site"
+                ),
+                {"sid": session_id, "site": site_name},
             ).fetchone()
 
             if result:
@@ -326,8 +393,10 @@ def get_or_create_session(engine, session_id: str, site_name: str) -> dict:
 
         with engine.begin() as conn_tx:
             conn_tx.execute(
-                text("INSERT INTO scan_sessions (session_id, site_name, last_page_index, status) VALUES (:sid, :site, 0, 'running')"),
-                {"sid": session_id, "site": site_name}
+                text(
+                    "INSERT INTO scan_sessions (session_id, site_name, last_page_index, status) VALUES (:sid, :site, 0, 'running')"
+                ),
+                {"sid": session_id, "site": site_name},
             )
         logger.info(f"[Checkpoint] Yeni session olusturuldu: {site_name}")
         return {"page": 0, "listing_id": None, "status": "running"}
@@ -336,7 +405,9 @@ def get_or_create_session(engine, session_id: str, site_name: str) -> dict:
         return {"page": 0, "listing_id": None, "status": "error"}
 
 
-def update_session_checkpoint(engine, session_id: str, site_name: str, page_idx: int, listing_id: str):
+def update_session_checkpoint(
+    engine, session_id: str, site_name: str, page_idx: int, listing_id: str
+):
     """Bir sayfanın taranması bittikten sonra checkpoint güncelle."""
     now = _now_sql(engine)
     try:
@@ -346,7 +417,7 @@ def update_session_checkpoint(engine, session_id: str, site_name: str, page_idx:
                     f"UPDATE scan_sessions SET last_page_index=:page, last_listing_id=:lid, "
                     f"last_updated_at={now} WHERE session_id=:sid AND site_name=:site"
                 ),
-                {"page": page_idx, "lid": listing_id, "sid": session_id, "site": site_name}
+                {"page": page_idx, "lid": listing_id, "sid": session_id, "site": site_name},
             )
     except Exception as e:
         logger.error(f"Checkpoint guncellenemedi ({site_name}, page {page_idx}): {e}")
@@ -358,8 +429,10 @@ def mark_session_complete(engine, session_id: str, site_name: str):
     try:
         with engine.begin() as conn:
             conn.execute(
-                text(f"UPDATE scan_sessions SET status='completed', last_updated_at={now} WHERE session_id=:sid AND site_name=:site"),
-                {"sid": session_id, "site": site_name}
+                text(
+                    f"UPDATE scan_sessions SET status='completed', last_updated_at={now} WHERE session_id=:sid AND site_name=:site"
+                ),
+                {"sid": session_id, "site": site_name},
             )
         logger.info(f"[Checkpoint] {site_name} taramasi tamamlandi")
     except Exception as e:
@@ -372,8 +445,10 @@ def mark_session_failed(engine, session_id: str, site_name: str, reason: str):
     try:
         with engine.begin() as conn:
             conn.execute(
-                text(f"UPDATE scan_sessions SET status='failed', last_updated_at={now} WHERE session_id=:sid AND site_name=:site"),
-                {"sid": session_id, "site": site_name}
+                text(
+                    f"UPDATE scan_sessions SET status='failed', last_updated_at={now} WHERE session_id=:sid AND site_name=:site"
+                ),
+                {"sid": session_id, "site": site_name},
             )
         logger.error(f"[Checkpoint] {site_name} taramasi basarisiz: {reason}")
     except Exception as e:

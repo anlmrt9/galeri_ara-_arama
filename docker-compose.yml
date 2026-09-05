@@ -1,0 +1,49 @@
+# Yerel geliştirme yığını: PostgreSQL + REST API + Streamlit arayüzü.
+#   docker compose up --build
+# Streamlit:  http://localhost:8501
+# API:        http://localhost:8000/docs
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: otogaleri
+      POSTGRES_PASSWORD: otogaleri
+      POSTGRES_DB: otogaleri
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otogaleri"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg2://otogaleri:otogaleri@db:5432/otogaleri
+      OTOGALERI_API_KEY: ${OTOGALERI_API_KEY:-}
+      OTOGALERI_CORS_ORIGINS: ${OTOGALERI_CORS_ORIGINS:-*}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: .
+    command: >
+      python -m streamlit run app.py
+      --server.address=0.0.0.0 --server.port=8501 --server.headless=true
+    environment:
+      DATABASE_URL: postgresql+psycopg2://otogaleri:otogaleri@db:5432/otogaleri
+    ports:
+      - "8501:8501"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

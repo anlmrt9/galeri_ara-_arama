@@ -1,69 +1,144 @@
 """
-config.py - OtoGaleriBot Merkezi Ayarlar
-=========================================
-Tüm sabitler, veritabanı bilgileri, bekleme süreleri ve
-ortam değişkeni override'ları burada tutulur.
+config.py - OtoGaleri Avcı Botu Merkezi Ayarlar
+================================================
+Tüm ayarlar ``pydantic-settings`` ile tek bir ``Settings`` sınıfında toplanır.
+Değerler şu öncelikle okunur:
 
-Bulut (Streamlit Cloud / Supabase) için DATABASE_URL,
-Lokal Windows için DB_SERVER / DB_NAME kullanılır.
+    1. Ortam değişkenleri (ör. ``OTOGALERI_TIMEOUT``)
+    2. Proje kökündeki ``.env`` dosyası
+    3. Sınıftaki varsayılanlar
+
+Veritabanı seçimi:
+    * ``DATABASE_URL`` tanımlıysa  → PostgreSQL / Supabase (bulut)
+    * Tanımlı değilse             → yerel SQL Server (Windows geliştirme)
+
+Geriye dönük uyumluluk: Eski ``BÜYÜK_HARF`` modül sabitleri (``DB_SERVER``,
+``SCRAPER_REQUEST_TIMEOUT`` vb.) hâlâ dışa aktarılır; diğer modüller bunları
+``from config import ...`` ile kullanmaya devam edebilir.
 """
 
-import os
+from __future__ import annotations
 
-# ---------- VERİTABANI (Öncelik sırası) ----------
-# 1) Streamlit secrets'tan DATABASE_URL (PostgreSQL / Supabase)
-# 2) Ortam değişkeninden DATABASE_URL
-# 3) Lokal SQL Server (Windows geliştirme)
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-def _get_database_url():
-    """Streamlit secrets veya ortam değişkeninden DATABASE_URL okur."""
+
+def _database_url_from_streamlit_secrets() -> str:
+    """Streamlit çalışıyorsa ``st.secrets['DATABASE_URL']`` değerini döndürür."""
     try:
         import streamlit as st
-        url = st.secrets.get("DATABASE_URL", "")
-        if url:
-            return url
+
+        return str(st.secrets.get("DATABASE_URL", "") or "")
     except Exception:
-        pass
-    return os.environ.get("DATABASE_URL", "")
+        return ""
 
-DATABASE_URL = _get_database_url()  # Boşsa SQL Server kullanılır
 
-DB_SERVER = os.environ.get("OTOGALERI_DB_SERVER", r"MERTPC\SQLEXPRESS")
-DB_NAME   = os.environ.get("OTOGALERI_DB_NAME", "OtoGaleriDB")
+class Settings(BaseSettings):
+    """Ortam değişkeni / ``.env`` ile override edilebilen merkezi ayarlar."""
 
-# ---------- SCRAPER AYARLARI ----------
-SCRAPER_REQUEST_TIMEOUT    = int(os.environ.get("OTOGALERI_TIMEOUT", "15"))
-SCRAPER_PAGE_WAIT_SEC      = int(os.environ.get("OTOGALERI_PAGE_WAIT", "2"))
-SCRAPER_SELENIUM_WAIT_SEC  = int(os.environ.get("OTOGALERI_SELENIUM_WAIT", "5"))
-SCRAPER_CYCLE_INTERVAL_SEC = int(os.environ.get("OTOGALERI_CYCLE_INTERVAL", "60"))
-MAX_NEW_LISTINGS_PER_CYCLE = int(os.environ.get("OTOGALERI_MAX_NEW", "5"))
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
-# ---------- DB POOL ----------
-DB_POOL_SIZE     = int(os.environ.get("OTOGALERI_POOL_SIZE", "5"))
-DB_MAX_OVERFLOW  = int(os.environ.get("OTOGALERI_MAX_OVERFLOW", "10"))
+    # ---------- VERİTABANI ----------
+    database_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("DATABASE_URL", "OTOGALERI_DATABASE_URL"),
+    )
+    db_server: str = Field(default=r"MERTPC\SQLEXPRESS", validation_alias="OTOGALERI_DB_SERVER")
+    db_name: str = Field(default="OtoGaleriDB", validation_alias="OTOGALERI_DB_NAME")
+
+    # ---------- DB POOL & RETRY ----------
+    db_connection_pool_size: int = Field(
+        default=10,
+        validation_alias=AliasChoices("OTOGALERI_DB_POOL_SIZE", "OTOGALERI_POOL_SIZE"),
+    )
+    db_connection_max_overflow: int = Field(
+        default=20,
+        validation_alias=AliasChoices("OTOGALERI_DB_MAX_OVERFLOW", "OTOGALERI_MAX_OVERFLOW"),
+    )
+    db_connection_recycle_seconds: int = Field(
+        default=3600, validation_alias="OTOGALERI_DB_RECYCLE"
+    )
+    db_query_timeout: int = Field(default=20, validation_alias="OTOGALERI_DB_TIMEOUT")
+    retry_max_attempts: int = Field(default=3, validation_alias="OTOGALERI_RETRY_ATTEMPTS")
+    retry_backoff_factor: int = Field(default=2, validation_alias="OTOGALERI_RETRY_BACKOFF")
+
+    # ---------- SCRAPER ----------
+    scraper_request_timeout: int = Field(default=15, validation_alias="OTOGALERI_TIMEOUT")
+    scraper_page_wait_sec: int = Field(default=2, validation_alias="OTOGALERI_PAGE_WAIT")
+    scraper_selenium_wait_sec: int = Field(default=5, validation_alias="OTOGALERI_SELENIUM_WAIT")
+    scraper_cycle_interval_sec: int = Field(default=60, validation_alias="OTOGALERI_CYCLE_INTERVAL")
+    max_new_listings_per_cycle: int = Field(default=5, validation_alias="OTOGALERI_MAX_NEW")
+
+    # ---------- BİLDİRİM ----------
+    site_failure_notify_cooldown_minutes: int = Field(
+        default=15, validation_alias="OTOGALERI_FAILURE_COOLDOWN"
+    )
+    notifications_enabled: bool = Field(
+        default=True, validation_alias="OTOGALERI_NOTIFICATIONS_ENABLED"
+    )
+
+    # ---------- LOG ----------
+    log_file: str = Field(default="otogaleri_log.txt", validation_alias="OTOGALERI_LOG_FILE")
+    log_level: str = Field(default="INFO", validation_alias="OTOGALERI_LOG_LEVEL")
+    log_max_bytes: int = Field(default=5_000_000, validation_alias="OTOGALERI_LOG_MAX_BYTES")
+    log_backup_count: int = Field(default=3, validation_alias="OTOGALERI_LOG_BACKUP_COUNT")
+
+    # ---------- API ----------
+    api_key: str = Field(default="", validation_alias="OTOGALERI_API_KEY")
+    api_cors_origins: str = Field(default="*", validation_alias="OTOGALERI_CORS_ORIGINS")
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """``api_cors_origins`` metnini virgülle ayırarak listeye çevirir."""
+        raw = self.api_cors_origins.strip()
+        if raw in ("", "*"):
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
+    @property
+    def effective_database_url(self) -> str:
+        """Env/`.env` boşsa Streamlit secrets'a düşen nihai ``DATABASE_URL``."""
+        return self.database_url or _database_url_from_streamlit_secrets()
+
+
+settings = Settings()
+
+# ==========================================================================
+#  GERİYE DÖNÜK UYUMLU MODÜL SABİTLERİ
+# ==========================================================================
+DATABASE_URL = settings.effective_database_url
+DB_SERVER = settings.db_server
+DB_NAME = settings.db_name
+
+SCRAPER_REQUEST_TIMEOUT = settings.scraper_request_timeout
+SCRAPER_PAGE_WAIT_SEC = settings.scraper_page_wait_sec
+SCRAPER_SELENIUM_WAIT_SEC = settings.scraper_selenium_wait_sec
+SCRAPER_CYCLE_INTERVAL_SEC = settings.scraper_cycle_interval_sec
+MAX_NEW_LISTINGS_PER_CYCLE = settings.max_new_listings_per_cycle
+
+DB_CONNECTION_POOL_SIZE = settings.db_connection_pool_size
+DB_CONNECTION_MAX_OVERFLOW = settings.db_connection_max_overflow
+DB_CONNECTION_RECYCLE_SECONDS = settings.db_connection_recycle_seconds
+DB_QUERY_TIMEOUT = settings.db_query_timeout
+RETRY_MAX_ATTEMPTS = settings.retry_max_attempts
+RETRY_BACKOFF_FACTOR = settings.retry_backoff_factor
+
+SITE_FAILURE_NOTIFY_COOLDOWN_MINUTES = settings.site_failure_notify_cooldown_minutes
+LOG_FILE = settings.log_file
 
 # ---------- SITE İSİMLERİ ----------
-SITE_OTOPLUS    = "Otoplus"
-SITE_VAVACARS   = "VavaCars"
-SITE_OTOKOC     = "Otokoç 2. El"
-SITE_ARABAM     = "Arabam.com"
+SITE_OTOPLUS = "Otoplus"
+SITE_VAVACARS = "VavaCars"
+SITE_OTOKOC = "Otokoç 2. El"
+SITE_ARABAM = "Arabam.com"
 SITE_SAHIBINDEN = "Sahibinden"
 
 ALL_SITES = [SITE_OTOPLUS, SITE_VAVACARS, SITE_OTOKOC, SITE_ARABAM, SITE_SAHIBINDEN]
-
-# ---------- BİLDİRİM ----------
-SITE_FAILURE_NOTIFY_COOLDOWN_MINUTES = int(os.environ.get("OTOGALERI_FAILURE_COOLDOWN", "15"))
-
-# ---------- LOG DOSYASI ----------
-LOG_FILE = os.environ.get("OTOGALERI_LOG_FILE", "otogaleri_log.txt")
-
-# ========== DATABASE POOL & RETRY ==========
-DB_CONNECTION_POOL_SIZE        = int(os.getenv("OTOGALERI_DB_POOL_SIZE", "10"))
-DB_CONNECTION_MAX_OVERFLOW     = int(os.getenv("OTOGALERI_DB_MAX_OVERFLOW", "20"))
-DB_CONNECTION_RECYCLE_SECONDS  = int(os.getenv("OTOGALERI_DB_RECYCLE", "3600"))
-DB_QUERY_TIMEOUT               = int(os.getenv("OTOGALERI_DB_TIMEOUT", "20"))
-RETRY_MAX_ATTEMPTS             = int(os.getenv("OTOGALERI_RETRY_ATTEMPTS", "3"))
-RETRY_BACKOFF_FACTOR           = int(os.getenv("OTOGALERI_RETRY_BACKOFF", "2"))
 
 # ---------- MARKA / MODEL KATALOĞU ----------
 # Streamlit arayüzü (app.py) ve mobil uygulama (api.py -> /api/config) aynı

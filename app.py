@@ -5,68 +5,42 @@ Sadece UI katmanı. İş mantığı scrapers.py, db.py, notifications.py'de.
 Monzo/Revolut tarzı koyu lacivert (neo-fintech) tasarımı uygular.
 """
 
-import streamlit as st
 import threading
-import time
 import uuid
-from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh
+from datetime import datetime
+
+import streamlit as st
+import streamlit.components.v1 as components
+from pydantic import ValidationError
 from streamlit.runtime.scriptrunner import add_script_run_ctx
+from streamlit_autorefresh import st_autorefresh
 
-from config import ALL_SITES, SCRAPER_CYCLE_INTERVAL_SEC, CAR_CATALOG, DAMAGE_PARTS
-from logger_setup import logger
-from db import get_engine, init_tables, load_data, mark_all_as_seen, clear_all
-from scrapers import run_one_cycle
-
+from config import ALL_SITES, CAR_CATALOG, DAMAGE_PARTS, SCRAPER_CYCLE_INTERVAL_SEC
+from db import clear_all, get_engine, init_tables, load_data
+from format_utils import format_try
+from scan_service import ScanCriteria, run_scan_loop
 
 # ==========================================================================
 #  ARKA PLAN TARAMA THREAD'İ
 # ==========================================================================
 
-def background_scan_thread(engine, criteria, stop_event):
-    """
-    Arka plan tarama döngüsü. Thread-safe durdurma için threading.Event kullanır.
-    GÖREV 2: session_id UUID ile her tarama oturumu takip edilir.
-    """
-    session_id = str(uuid.uuid4())  # Benzersiz tarama oturumu ID'si
-    logger.info(f"[Scan] Yeni tarama oturumu basladi: {session_id}")
 
-    duration_hours = criteria['duration']
-    end_time = datetime.now() + timedelta(hours=duration_hours)
-
-    mark_all_as_seen(engine)
-
-    while datetime.now() < end_time:
-        if stop_event.is_set():
-            logger.info("Tarama stop_event ile durduruldu.")
-            break
-
-        run_one_cycle(engine, criteria, session_id=session_id)
-        stop_event.wait(timeout=SCRAPER_CYCLE_INTERVAL_SEC)
-
-    logger.info("Tarama dongusu tamamlandi.")
-
-
-def format_try(value):
-    """34.980.5 -> '34.980,50' bicimine (TR yerel ayari) cevirir."""
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return "0,00"
-    formatted = f"{value:,.2f}"
-    # 1,234,567.89 (US) -> 1.234.567,89 (TR)
-    formatted = formatted.replace(",", "§").replace(".", ",").replace("§", ".")
-    return formatted
+def _run_scan(engine, criteria: ScanCriteria, stop_event: threading.Event) -> None:
+    """Streamlit arka plan thread'i — ortak tarama döngüsünü çağırır."""
+    session_id = str(uuid.uuid4())
+    run_scan_loop(engine, criteria, stop_event, session_id, label="Streamlit")
 
 
 # ==========================================================================
 #  STREAMLIT CONFIG & NEO-FINTECH DARK THEME
 # ==========================================================================
 
-st.set_page_config(page_title="OtoGaleri Avcı Botu | Sourcing Infrastructure", layout="wide", page_icon="🎯")
+st.set_page_config(
+    page_title="OtoGaleri Avcı Botu | Sourcing Infrastructure", layout="wide", page_icon="🎯"
+)
 
 # Scan aktifse otomatik yenile
-if st.session_state.get('scan_active', False):
+if st.session_state.get("scan_active", False):
     st_autorefresh(interval=15000, key="datarefresh")
 
 if "display_id" not in st.session_state:
@@ -75,8 +49,8 @@ if "display_id" not in st.session_state:
 # ==========================================================================
 #  PWA: manifest + service worker (telefonda "Ana Ekrana Ekle" desteği)
 # ==========================================================================
-import streamlit.components.v1 as pwa_components
-pwa_components.html("""
+components.html(
+    """
 <script>
 (function() {
     const doc = window.parent.document;
@@ -225,10 +199,14 @@ pwa_components.html("""
     }
 })();
 </script>
-""", height=0, width=0)
+""",
+    height=0,
+    width=0,
+)
 
 # Inject Custom Neo-Fintech Styling
-st.markdown("""
+st.markdown(
+    """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -423,7 +401,9 @@ st.markdown("""
         .balance-amount { font-size: 28px; }
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 engine = get_engine()
 if engine:
@@ -447,14 +427,17 @@ greeting_word = "Günaydın" if hour < 12 else ("İyi günler" if hour < 18 else
 
 if not df.empty:
     site_counts = df["source_site"].value_counts()
-    bar_heights = [min(100, max(20, int(v / site_counts.max() * 100))) for v in site_counts.tolist()[:7]]
+    bar_heights = [
+        min(100, max(20, int(v / site_counts.max() * 100))) for v in site_counts.tolist()[:7]
+    ]
 else:
     bar_heights = [30, 45, 35, 60, 40, 70, 55]
 sparkline_html = "".join(f'<span style="--h:{h}%"></span>' for h in bar_heights)
 
 notif_dot_html = '<span class="notif-dot"></span>' if len(new_listings_df) > 0 else ""
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <div class="topbar">
     <div>
         <span class="greeting-hello">{greeting_word}</span>
@@ -465,26 +448,32 @@ st.markdown(f"""
         <div class="bell-wrap">🔔{notif_dot_html}</div>
     </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ==========================================================================
 #  BALANCE: TOPLAM TESPİT EDİLEN DEĞER
 # ==========================================================================
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <div class="balance-block">
     <p class="balance-label">Toplam Tespit Edilen Değer</p>
     <h1 class="balance-amount tnum">₺{format_try(total_value)}</h1>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ==========================================================================
 #  HERO CARD (TILTED BRAND CARD)
 # ==========================================================================
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <div class="hero-card-wrap">
     <div class="hero-card">
         <div class="hero-card-top">
@@ -494,7 +483,9 @@ st.markdown(f"""
         <div class="hero-card-number tnum">•••• {st.session_state.display_id}</div>
     </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ==========================================================================
@@ -505,7 +496,10 @@ with st.container(key="quick_actions"):
     qa1, qa2, qa3, qa4 = st.columns(4)
 
     with qa1:
-        st.markdown('<a class="qa-anchor" href="#hedef-arac-ozellikleri">▶️</a><span class="qa-label">Başlat</span>', unsafe_allow_html=True)
+        st.markdown(
+            '<a class="qa-anchor" href="#hedef-arac-ozellikleri">▶️</a><span class="qa-label">Başlat</span>',
+            unsafe_allow_html=True,
+        )
 
     with qa2:
         st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
@@ -543,12 +537,18 @@ st.markdown('<div style="padding: 0 10%;">', unsafe_allow_html=True)
 st.markdown('<p class="today-title">Son Bulunanlar</p>', unsafe_allow_html=True)
 
 SITE_EMOJI = {
-    "Otoplus": "🚗", "VavaCars": "🚙", "Otokoç 2. El": "🚘",
-    "Arabam.com": "🏎️", "Sahibinden": "🚓",
+    "Otoplus": "🚗",
+    "VavaCars": "🚙",
+    "Otokoç 2. El": "🚘",
+    "Arabam.com": "🏎️",
+    "Sahibinden": "🚓",
 }
 SITE_EMOJI_BG = {
-    "Otoplus": "#2a2140", "VavaCars": "#132a2a", "Otokoç 2. El": "#3a2418",
-    "Arabam.com": "#173021", "Sahibinden": "#242742",
+    "Otoplus": "#2a2140",
+    "VavaCars": "#132a2a",
+    "Otokoç 2. El": "#3a2418",
+    "Arabam.com": "#173021",
+    "Sahibinden": "#242742",
 }
 
 if not df.empty:
@@ -563,7 +563,8 @@ if not df.empty:
             time_str = row["scraped_at"].strftime("%H:%M") if row["scraped_at"] else "--:--"
         except Exception:
             time_str = "--:--"
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="tx-row">
             <span class="tx-emoji" style="background:{bg}">{emoji}</span>
             <div class="tx-info">
@@ -572,22 +573,28 @@ if not df.empty:
             </div>
             <span class="{amount_class}">{sign}₺{format_try(row['price'])}</span>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 else:
-    st.markdown("""
+    st.markdown(
+        """
     <div class="tx-row" style="border-bottom:none;">
         <div class="tx-info">
             <span class="tx-name">Henüz araç bulunamadı</span>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 if st.session_state.scan_active:
     upcoming_text = f"Sıradaki tarama ~{SCRAPER_CYCLE_INTERVAL_SEC} saniye içinde"
 else:
     upcoming_text = "Tarama başlatıldığında burada görünecek"
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <div class="tx-row upcoming">
     <span class="tx-emoji" style="background:#242742">⏱️</span>
     <div class="tx-info">
@@ -595,7 +602,9 @@ st.markdown(f"""
         <span class="tx-time">{upcoming_text}</span>
     </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("<div style='height: 2.5rem;'></div>", unsafe_allow_html=True)
@@ -615,7 +624,7 @@ st.markdown('<div class="parameter-header">🎯 Hedef Araç Özellikleri</div>',
 grid_col1, grid_col2 = st.columns(2)
 
 with grid_col1:
-    t_brand = st.selectbox("Marka Seçin", ["Tümü"] + sorted(list(CAR_CATALOG.keys())))
+    t_brand = st.selectbox("Marka Seçin", ["Tümü"] + sorted(CAR_CATALOG.keys()))
 with grid_col2:
     if t_brand == "Tümü":
         t_model = st.selectbox("Model Seçin", ["Tümü"])
@@ -625,33 +634,44 @@ with grid_col2:
 with st.expander("🎚️ Fiyat / Yıl / Kilometre / Tramer Filtreleri", expanded=False):
     p_col1, p_col2, p_col3 = st.columns(3)
     with p_col1:
-        t_min_price = st.number_input("Minimum Fiyat (TL)", value=None, placeholder="Örn: 500000", step=50000)
-        t_max_price = st.number_input("Maksimum Fiyat (TL)", value=None, placeholder="Limit Yok", step=50000)
+        t_min_price = st.number_input(
+            "Minimum Fiyat (TL)", value=None, placeholder="Örn: 500000", step=50000
+        )
+        t_max_price = st.number_input(
+            "Maksimum Fiyat (TL)", value=None, placeholder="Limit Yok", step=50000
+        )
     with p_col2:
         t_min_year = st.number_input("Minimum Yıl", value=None, placeholder="Örn: 2015", step=1)
         t_max_year = st.number_input("Maksimum Yıl", value=None, placeholder="Örn: 2024", step=1)
     with p_col3:
-        t_min_km = st.number_input("Minimum Kilometre (KM)", value=None, placeholder="Örn: 0", step=10000)
-        t_max_km = st.number_input("Maksimum Kilometre (KM)", value=None, placeholder="Limit Yok (Örn: 120000)", step=10000)
+        t_min_km = st.number_input(
+            "Minimum Kilometre (KM)", value=None, placeholder="Örn: 0", step=10000
+        )
+        t_max_km = st.number_input(
+            "Maksimum Kilometre (KM)", value=None, placeholder="Limit Yok (Örn: 120000)", step=10000
+        )
 
     p_col4, p_col5 = st.columns(2)
     with p_col4:
-        t_max_tramer = st.number_input("Maksimum Kabul Edilen Tramer (TL)", value=None, placeholder="Hasarsız (Örn: 15000)", step=5000)
+        t_max_tramer = st.number_input(
+            "Maksimum Kabul Edilen Tramer (TL)",
+            value=None,
+            placeholder="Hasarsız (Örn: 15000)",
+            step=5000,
+        )
     with p_col5:
         t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=24.0, step=1.0)
 
 st.markdown("<br>", unsafe_allow_html=True)
-target_sites = st.multiselect(
-    "Hedef Kanallar / Siteler",
-    ALL_SITES,
-    default=ALL_SITES
-)
+target_sites = st.multiselect("Hedef Kanallar / Siteler", ALL_SITES, default=ALL_SITES)
 
 # Allowed damages config
 st.markdown("<br><b>🚘 İnteraktif Araç Hasar Haritası</b>", unsafe_allow_html=True)
-st.markdown("<p style='font-size: 13px; color: var(--muted);'>Aşağıdaki şemada araç parçalarına tıklayarak izin verdiğiniz maksimum hasar durumunu seçin (Gri: Orijinal, Mavi: Boyalı, Kırmızı: Değişen).</p>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='font-size: 13px; color: var(--muted);'>Aşağıdaki şemada araç parçalarına tıklayarak izin verdiğiniz maksimum hasar durumunu seçin (Gri: Orijinal, Mavi: Boyalı, Kırmızı: Değişen).</p>",
+    unsafe_allow_html=True,
+)
 
-import streamlit.components.v1 as components
 car_map = components.declare_component("car_map", path="car_map_component")
 car_state = car_map(key="car_map", default=None)
 
@@ -673,7 +693,7 @@ with act_col1:
     # We place submit inside a custom class container for primary button style
     st.markdown('<div class="primary-btn">', unsafe_allow_html=True)
     submit_btn = st.button("🚀 Tarama ve Tedarik Sürecini Başlat", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with act_col2:
     if st.session_state.scan_active:
@@ -684,36 +704,47 @@ with act_col2:
                 st.session_state.stop_event.set()
             st.rerun()
     else:
-        st.button("🛑 Tarama Oturumunu Sonlandır (Devre Dışı)", use_container_width=True, disabled=True)
+        st.button(
+            "🛑 Tarama Oturumunu Sonlandır (Devre Dışı)", use_container_width=True, disabled=True
+        )
 
 if submit_btn:
-    st.session_state.scan_active = True
-    stop_event = threading.Event()
-    st.session_state.stop_event = stop_event
+    try:
+        criteria = ScanCriteria.from_optional(
+            sites=target_sites,
+            brand=t_brand,
+            model=t_model,
+            min_price=t_min_price,
+            max_price=t_max_price,
+            min_year=t_min_year,
+            max_year=t_max_year,
+            min_km=t_min_km,
+            max_km=t_max_km,
+            max_tramer=t_max_tramer,
+            duration_hours=t_duration,
+            allowed_parts=allowed_parts,
+        )
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        st.error(f"Geçersiz kriter: {first.get('msg', exc)}")
+    else:
+        if engine is None:
+            st.error("Veritabanına bağlanılamadı — tarama başlatılamıyor.")
+        else:
+            st.session_state.scan_active = True
+            stop_event = threading.Event()
+            st.session_state.stop_event = stop_event
 
-    criteria = {
-        "sites": target_sites,
-        "brand": t_brand, "model": t_model,
-        "min_price": t_min_price if t_min_price is not None else 0,
-        "max_price": t_max_price if t_max_price is not None else 999999999,
-        "min_year": t_min_year if t_min_year is not None else 1970,
-        "max_year": t_max_year if t_max_year is not None else 2030,
-        "min_km": t_min_km if t_min_km is not None else 0,
-        "max_km": t_max_km if t_max_km is not None else 1000000,
-        "max_tramer": t_max_tramer if t_max_tramer is not None else 999999999,
-        "duration": t_duration if t_duration is not None else 24.0,
-        "allowed_parts": allowed_parts
-    }
-    t = threading.Thread(
-        target=background_scan_thread,
-        args=(engine, criteria, stop_event),
-        daemon=True
-    )
-    add_script_run_ctx(t)
-    t.start()
-    st.rerun()
+            t = threading.Thread(
+                target=_run_scan,
+                args=(engine, criteria, stop_event),
+                daemon=True,
+            )
+            add_script_run_ctx(t)
+            t.start()
+            st.rerun()
 
-st.markdown('</div>', unsafe_allow_html=True) # End parameter-card
+st.markdown("</div>", unsafe_allow_html=True)  # End parameter-card
 
 
 # ==========================================================================
@@ -722,17 +753,19 @@ st.markdown('</div>', unsafe_allow_html=True) # End parameter-card
 
 st.markdown('<div style="margin: 3rem 10% 0 10%;">', unsafe_allow_html=True)
 
-st.markdown('<h3>📊 Bulunan Araçlar</h3>', unsafe_allow_html=True)
+st.markdown("<h3>📊 Bulunan Araçlar</h3>", unsafe_allow_html=True)
 
 if not df.empty:
     if not new_listings_df.empty:
         st.markdown(f"#### 🚨 YENİ YAKALANAN ARAÇLAR ({len(new_listings_df)} ilan)")
-        for idx, row in new_listings_df.iterrows():
+        for _idx, row in new_listings_df.iterrows():
             badge_color = (
-                "#ff4b4b" if row['source_site'] == "Otoplus"
-                else ("#1e90ff" if row['source_site'] == "VavaCars" else "#ffa500")
+                "#ff4b4b"
+                if row["source_site"] == "Otoplus"
+                else ("#1e90ff" if row["source_site"] == "VavaCars" else "#ffa500")
             )
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div class="new-listing">
                 <span style="background:{badge_color}; color:#ffffff; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; margin-right:10px;">{row['source_site']}</span>
                 <b>{row['brand']} {row['model']} {row['package_trim']}</b> ({row['year']} | {row['km']} km) -
@@ -742,15 +775,27 @@ if not df.empty:
                 <br>
                 <a href="{row['link']}" target="_blank" style="color:var(--pink); font-size:12px; font-weight: 500;">İlana Git ↗</a>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
         st.divider()
 
     st.markdown(f"#### 📋 Tüm Kayıtlı Araçlar ({len(df)} toplam ilan)")
 
     show_cols = [
-        "source_site", "brand", "model", "package_trim", "engine_power",
-        "year", "km", "price", "tramer_fee", "painted_parts", "changed_parts",
-        "link", "scraped_at"
+        "source_site",
+        "brand",
+        "model",
+        "package_trim",
+        "engine_power",
+        "year",
+        "km",
+        "price",
+        "tramer_fee",
+        "painted_parts",
+        "changed_parts",
+        "link",
+        "scraped_at",
     ]
     df_show = df[[c for c in show_cols if c in df.columns]].copy()
 
@@ -761,8 +806,8 @@ if not df.empty:
         column_config={
             "link": st.column_config.LinkColumn("İlan Linki", display_text="İlana Git"),
             "price": st.column_config.NumberColumn("Fiyat (TL)", format="%d ₺"),
-            "tramer_fee": st.column_config.NumberColumn("Tramer (TL)", format="%d ₺")
-        }
+            "tramer_fee": st.column_config.NumberColumn("Tramer (TL)", format="%d ₺"),
+        },
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -771,6 +816,8 @@ if not df.empty:
         st.success("Tüm araç verileri başarıyla silindi.")
         st.rerun()
 else:
-    st.info("Henüz sistemde eşleşen bir araç bulunamadı. Lütfen hedeflerinizi belirleyip taramayı başlatın.")
+    st.info(
+        "Henüz sistemde eşleşen bir araç bulunamadı. Lütfen hedeflerinizi belirleyip taramayı başlatın."
+    )
 
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)

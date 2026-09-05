@@ -9,28 +9,37 @@ GÖREV 2: session_id checkpoint entegrasyonu
 GÖREV 3: @retry_http_request dekoratörü
 """
 
-import re
 import json
+import re
 import time
 import uuid
 from datetime import datetime
 from functools import wraps
+
 from bs4 import BeautifulSoup
 from curl_cffi import requests as cf
 
 from config import (
-    SITE_OTOPLUS, SITE_VAVACARS, SITE_OTOKOC, SITE_ARABAM, SITE_SAHIBINDEN,
-    SCRAPER_REQUEST_TIMEOUT, SCRAPER_PAGE_WAIT_SEC, SCRAPER_SELENIUM_WAIT_SEC,
-    MAX_NEW_LISTINGS_PER_CYCLE, RETRY_MAX_ATTEMPTS, RETRY_BACKOFF_FACTOR,
+    MAX_NEW_LISTINGS_PER_CYCLE,
+    RETRY_BACKOFF_FACTOR,
+    RETRY_MAX_ATTEMPTS,
+    SCRAPER_PAGE_WAIT_SEC,
+    SCRAPER_REQUEST_TIMEOUT,
+    SCRAPER_SELENIUM_WAIT_SEC,
+    SITE_ARABAM,
+    SITE_OTOKOC,
+    SITE_OTOPLUS,
+    SITE_SAHIBINDEN,
+    SITE_VAVACARS,
 )
+from db import insert_car, listing_exists
 from logger_setup import logger
-from db import listing_exists, insert_car
 from notifications import send_desktop_notification, send_site_failure_notification
-
 
 # ==========================================================================
 #  GÖREV 3: HTTP Retry Dekoratörü
 # ==========================================================================
+
 
 def retry_http_request(max_attempts=None, backoff_factor=None, base_delay=1):
     """HTTP isteklerinde exponential backoff (1s, 2s, 4s...)."""
@@ -51,33 +60,42 @@ def retry_http_request(max_attempts=None, backoff_factor=None, base_delay=1):
                     # HTTP 429 — rate limit: çok daha uzun bekle
                     if "429" in error_str:
                         wait_time = base_delay * 10
-                        logger.warning(f"[Rate Limit] HTTP 429 alindi, {wait_time:.0f}s bekleniyor...")
+                        logger.warning(
+                            f"[Rate Limit] HTTP 429 alindi, {wait_time:.0f}s bekleniyor..."
+                        )
                         time.sleep(wait_time)
                         last_exception = e
                         continue
                     # HTTP 403 — bot bloğu: devam etme
                     elif "403" in error_str:
-                        logger.warning(f"[Bot Block] HTTP 403 alindi — bot korumasi tespit edildi: {func.__name__}")
+                        logger.warning(
+                            f"[Bot Block] HTTP 403 alindi — bot korumasi tespit edildi: {func.__name__}"
+                        )
                         raise e
 
                     last_exception = e
                     if attempt < max_attempts - 1:
-                        wait_time = base_delay * (backoff_factor ** attempt)
+                        wait_time = base_delay * (backoff_factor**attempt)
                         logger.warning(
                             f"[Retry {func.__name__}] Denemesi {attempt+1}/{max_attempts} basarisiz, "
                             f"{wait_time:.1f}s bekleniyor: {str(e)[:80]}"
                         )
                         time.sleep(wait_time)
 
-            logger.error(f"[Retry {func.__name__}] Tum {max_attempts} deneme basarisiz: {last_exception}")
+            logger.error(
+                f"[Retry {func.__name__}] Tum {max_attempts} deneme basarisiz: {last_exception}"
+            )
             raise last_exception
+
         return wrapper
+
     return decorator
 
 
 # ==========================================================================
 #  YARDIMCI FONKSİYONLAR
 # ==========================================================================
+
 
 def _safe_int(value, default=0):
     """
@@ -98,7 +116,9 @@ def check_part_allowed(text_content, keyword, allowed_parts):
     Belirli bir parçada boya/değişen olduğu metinde geçiyorsa,
     bu parçanın allowed_parts listesinde olup olmadığını kontrol eder.
     """
-    if keyword in text_content and ("boya" in text_content or "değişen" in text_content or "lokal" in text_content):
+    if keyword in text_content and (
+        "boya" in text_content or "değişen" in text_content or "lokal" in text_content
+    ):
         if keyword not in allowed_parts:
             return False
     return True
@@ -107,13 +127,23 @@ def check_part_allowed(text_content, keyword, allowed_parts):
 def extract_damaged_parts(text_content):
     """Metin içinden hasar görmüş parçaları ayıklar."""
     parts = [
-        "kaput", "tavan", "bagaj", "sol ön çamurluk", "sağ ön çamurluk",
-        "sol ön kapı", "sağ ön kapı", "sol arka kapı", "sağ arka kapı",
-        "sol arka çamurluk", "sağ arka çamurluk"
+        "kaput",
+        "tavan",
+        "bagaj",
+        "sol ön çamurluk",
+        "sağ ön çamurluk",
+        "sol ön kapı",
+        "sağ ön kapı",
+        "sol arka kapı",
+        "sağ arka kapı",
+        "sol arka çamurluk",
+        "sağ arka çamurluk",
     ]
     found_parts = []
     for p in parts:
-        if p in text_content and ("boya" in text_content or "değiş" in text_content or "lokal" in text_content):
+        if p in text_content and (
+            "boya" in text_content or "değiş" in text_content or "lokal" in text_content
+        ):
             found_parts.append(p.title())
     return ", ".join(found_parts) if found_parts else "Bilinmiyor/Metinde Yok"
 
@@ -121,6 +151,7 @@ def extract_damaged_parts(text_content):
 # ==========================================================================
 #  GÖREV 3: Retry'lı Sayfa Fetch Yardımcıları
 # ==========================================================================
+
 
 @retry_http_request(max_attempts=3, backoff_factor=2, base_delay=1)
 def _fetch_page_curl(session, url):
@@ -136,9 +167,14 @@ def scrape_listing_details(session, link, allowed_parts=None):
     if allowed_parts is None:
         allowed_parts = []
     details = {
-        "model": "", "package_trim": "", "engine_power": "", "location": "",
-        "tramer_fee": 0, "painted_parts": "Orijinal", "changed_parts": "Orijinal",
-        "rejected": False
+        "model": "",
+        "package_trim": "",
+        "engine_power": "",
+        "location": "",
+        "tramer_fee": 0,
+        "painted_parts": "Orijinal",
+        "changed_parts": "Orijinal",
+        "rejected": False,
     }
     try:
         try:
@@ -150,14 +186,16 @@ def scrape_listing_details(session, link, allowed_parts=None):
         soup = BeautifulSoup(r.text, "lxml")
         text_content = soup.get_text().lower()
 
-        tramer_match = re.search(r'tramer[\s:]*([\d\.]+)[\s]*tl', text_content)
+        tramer_match = re.search(r"tramer[\s:]*([\d\.]+)[\s]*tl", text_content)
         if tramer_match:
             details["tramer_fee"] = _safe_int(tramer_match.group(1).replace(".", ""))
 
         # Genel "boyasız", "hatasız" kontrolü
-        if (re.search(r'(boya|boyalı).*?(yok|yoktur|bulunmamaktadır)', text_content)
-                or "boyasız" in text_content
-                or "hatasız" in text_content):
+        if (
+            re.search(r"(boya|boyalı).*?(yok|yoktur|bulunmamaktadır)", text_content)
+            or "boyasız" in text_content
+            or "hatasız" in text_content
+        ):
             pass  # Temiz araç
         else:
             # Kullanıcı SIFIR boya istiyorsa (allowed_parts boş) ve araçta boya varsa REDDET
@@ -167,9 +205,17 @@ def scrape_listing_details(session, link, allowed_parts=None):
 
             # Spesifik parça kontrolü
             all_parts = [
-                "kaput", "tavan", "bagaj", "sol ön çamurluk", "sağ ön çamurluk",
-                "sol ön kapı", "sağ ön kapı", "sol arka kapı", "sağ arka kapı",
-                "sol arka çamurluk", "sağ arka çamurluk"
+                "kaput",
+                "tavan",
+                "bagaj",
+                "sol ön çamurluk",
+                "sağ ön çamurluk",
+                "sol ön kapı",
+                "sağ ön kapı",
+                "sol arka kapı",
+                "sağ arka kapı",
+                "sol arka çamurluk",
+                "sağ arka çamurluk",
             ]
             for p in all_parts:
                 if not check_part_allowed(text_content, p, allowed_parts):
@@ -194,9 +240,15 @@ def scrape_listing_details(session, link, allowed_parts=None):
 #  OTOPLUS SCRAPER
 # ==========================================================================
 
+
 def scrape_otoplus(engine, criteria, max_pages_per_cycle=3, session_id: str = None):
     """Otoplus ikinci el araç sitesinden veri çeker (curl_cffi + JSON-LD). GÖREV 2: checkpoint destekli."""
-    from db import get_or_create_session, update_session_checkpoint, mark_session_complete, mark_session_failed
+    from db import (
+        get_or_create_session,
+        mark_session_complete,
+        mark_session_failed,
+        update_session_checkpoint,
+    )
 
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -206,7 +258,7 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3, session_id: str = No
     start_page = checkpoint.get("page", 0)
 
     base_url = "https://www.otoplus.com/ikinci-el-araba"
-    target_brand_slug = criteria['brand'].strip().lower().replace(" ", "-")
+    target_brand_slug = criteria["brand"].strip().lower().replace(" ", "-")
     if target_brand_slug and target_brand_slug != "tümü":
         base_url = f"https://www.otoplus.com/ikinci-el-araba/{target_brand_slug}"
 
@@ -234,22 +286,34 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3, session_id: str = No
                         if item.get("@type") != "Vehicle":
                             continue
 
-                        brand = item.get("brand", {}).get("name", "") if isinstance(item.get("brand"), dict) else ""
+                        brand = (
+                            item.get("brand", {}).get("name", "")
+                            if isinstance(item.get("brand"), dict)
+                            else ""
+                        )
                         year = _safe_int(item.get("vehicleModelDate"))
                         km = _safe_int(item.get("mileageFromOdometer", {}).get("value"))
                         price = _safe_int(item.get("offers", {}).get("price"))
 
                         # 1. AŞAMA FİLTRE
-                        if criteria['brand'] and criteria['brand'] != "Tümü" and criteria['brand'].lower() not in brand.lower():
+                        if (
+                            criteria["brand"]
+                            and criteria["brand"] != "Tümü"
+                            and criteria["brand"].lower() not in brand.lower()
+                        ):
                             continue
                         title = item.get("name", "").lower()
-                        if criteria['model'] and criteria['model'] != "Tümü" and criteria['model'].lower() not in title:
+                        if (
+                            criteria["model"]
+                            and criteria["model"] != "Tümü"
+                            and criteria["model"].lower() not in title
+                        ):
                             continue
-                        if price < criteria['min_price'] or price > criteria['max_price']:
+                        if price < criteria["min_price"] or price > criteria["max_price"]:
                             continue
-                        if year < criteria['min_year'] or year > criteria['max_year']:
+                        if year < criteria["min_year"] or year > criteria["max_year"]:
                             continue
-                        if km < criteria['min_km'] or km > criteria['max_km']:
+                        if km < criteria["min_km"] or km > criteria["max_km"]:
                             continue
 
                         link = item.get("offers", {}).get("url") or item.get("url") or ""
@@ -273,22 +337,31 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3, session_id: str = No
                             continue
 
                         car_data = {
-                            "listing_id": listing_id, "source_site": SITE_OTOPLUS,
-                            "brand": brand, "model": details["model"],
+                            "listing_id": listing_id,
+                            "source_site": SITE_OTOPLUS,
+                            "brand": brand,
+                            "model": details["model"],
                             "package_trim": details["package_trim"],
                             "engine_power": details["engine_power"],
-                            "year": year, "km": km, "price": price,
-                            "location": details["location"], "tramer_fee": tramer,
+                            "year": year,
+                            "km": km,
+                            "price": price,
+                            "location": details["location"],
+                            "tramer_fee": tramer,
                             "painted_parts": details["painted_parts"],
                             "changed_parts": details["changed_parts"],
                             "link": link,
                             "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "is_new_listing": 1
+                            "is_new_listing": 1,
                         }
 
                         if insert_car(engine, car_data):
-                            logger.info(f"[{SITE_OTOPLUS}] HEDEFE UYAN ARAC BULUNDU: {brand} - {price} TL")
-                            send_desktop_notification(brand, details["model"], price, details["painted_parts"])
+                            logger.info(
+                                f"[{SITE_OTOPLUS}] HEDEFE UYAN ARAC BULUNDU: {brand} - {price} TL"
+                            )
+                            send_desktop_notification(
+                                brand, details["model"], price, details["painted_parts"]
+                            )
 
                         time.sleep(1)
 
@@ -313,35 +386,43 @@ def scrape_otoplus(engine, criteria, max_pages_per_cycle=3, session_id: str = No
 #  VAVACARS SCRAPER
 # ==========================================================================
 
+
 def scrape_vavacars(engine, criteria, session_id: str = None):
     """VavaCars için veri çekme (SeleniumBase UC Mode). GÖREV 2: session_id destekli."""
     if not session_id:
         session_id = str(uuid.uuid4())
-    target_brand = criteria['brand'].strip() if criteria['brand'] and criteria['brand'] != "Tümü" else ""
-    base_url = f"https://tr.vava.cars/buy/cars/{target_brand}" if target_brand else "https://tr.vava.cars/buy/cars"
+    target_brand = (
+        criteria["brand"].strip() if criteria["brand"] and criteria["brand"] != "Tümü" else ""
+    )
+    base_url = (
+        f"https://tr.vava.cars/buy/cars/{target_brand}"
+        if target_brand
+        else "https://tr.vava.cars/buy/cars"
+    )
 
     try:
         from seleniumbase import SB
+
         with SB(uc=True, test=True, headless=True) as sb:
             sb.uc_open_with_reconnect(base_url, 4)
             time.sleep(SCRAPER_SELENIUM_WAIT_SEC)
             html = sb.get_page_source()
-            soup = BeautifulSoup(html, 'html.parser')
+            soup = BeautifulSoup(html, "html.parser")
 
             # Tüm ilan linklerini (a etiketlerini) bul
-            car_links = soup.find_all('a', href=True)
+            car_links = soup.find_all("a", href=True)
             valid_cards = []
             for a in car_links:
-                href = a['href']
-                if '/buy/cars/' in href and len(href.split('/')) >= 4:
+                href = a["href"]
+                if "/buy/cars/" in href and len(href.split("/")) >= 4:
                     if a not in valid_cards:
                         valid_cards.append(a)
 
             new_cars_found = 0
             for a_tag in valid_cards:
-                href = a_tag['href']
-                listing_id = href.split('/')[-1]
-                full_link = "https://tr.vava.cars" + href if href.startswith('/') else href
+                href = a_tag["href"]
+                listing_id = href.split("/")[-1]
+                full_link = "https://tr.vava.cars" + href if href.startswith("/") else href
 
                 if listing_exists(engine, listing_id):
                     continue
@@ -362,46 +443,60 @@ def scrape_vavacars(engine, criteria, session_id: str = None):
                 # BUG FIX: _safe_int kullanılıyor, int() patlaması önlendi
                 year = _safe_int(tags[0]) if len(tags) > 0 and tags[0].strip().isdigit() else 0
                 km_text = tags[1] if len(tags) > 1 else "0"
-                km_digits = re.sub(r'\D', '', km_text)
+                km_digits = re.sub(r"\D", "", km_text)
                 km = _safe_int(km_digits) if km_digits else 0
 
                 price_div = a_tag.find("div", class_=lambda c: c and "text-h3" in c)
                 price_text = price_div.text.strip() if price_div else "0"
-                price_digits = re.sub(r'\D', '', price_text)
+                price_digits = re.sub(r"\D", "", price_text)
                 price = _safe_int(price_digits) if price_digits else 0
 
                 badge = a_tag.find("span", class_=lambda c: c and "font-semibold" in c)
                 damage_info = badge.text.strip() if badge else "Hasar Bilgisi Yok"
 
-                brand_str = target_brand if target_brand else title.split(' ')[0]
-                model_str = title.replace(brand_str, '').strip() if brand_str in title else title
+                brand_str = target_brand if target_brand else title.split(" ")[0]
+                model_str = title.replace(brand_str, "").strip() if brand_str in title else title
 
                 # Filtreler
-                if price < criteria['min_price'] or price > criteria['max_price']:
+                if price < criteria["min_price"] or price > criteria["max_price"]:
                     continue
-                if year < criteria['min_year'] or year > criteria['max_year']:
+                if year < criteria["min_year"] or year > criteria["max_year"]:
                     continue
-                if km < criteria['min_km'] or km > criteria['max_km']:
+                if km < criteria["min_km"] or km > criteria["max_km"]:
                     continue
-                if criteria['model'] and criteria['model'] != "Tümü" and criteria['model'].lower() not in model_str.lower():
+                if (
+                    criteria["model"]
+                    and criteria["model"] != "Tümü"
+                    and criteria["model"].lower() not in model_str.lower()
+                ):
                     continue
 
                 # Hasar filtreleri
-                has_damage = "boyasız, değişensiz" not in damage_info.lower() and damage_info != "Orijinal / Hatasız"
+                has_damage = (
+                    "boyasız, değişensiz" not in damage_info.lower()
+                    and damage_info != "Orijinal / Hatasız"
+                )
                 if has_damage and len(criteria.get("allowed_parts", [])) == 0:
                     logger.info(f"[{SITE_VAVACARS}] SKIP - Hasar filtresine takildi: {title}")
                     continue
 
                 car_data = {
-                    "listing_id": listing_id, "source_site": SITE_VAVACARS,
-                    "brand": brand_str, "model": model_str, "package_trim": package,
-                    "engine_power": "", "year": year, "km": km, "price": price,
-                    "location": "Bilinmiyor", "tramer_fee": 0,
+                    "listing_id": listing_id,
+                    "source_site": SITE_VAVACARS,
+                    "brand": brand_str,
+                    "model": model_str,
+                    "package_trim": package,
+                    "engine_power": "",
+                    "year": year,
+                    "km": km,
+                    "price": price,
+                    "location": "Bilinmiyor",
+                    "tramer_fee": 0,
                     "painted_parts": damage_info,
                     "changed_parts": "Detay İlanda",
                     "link": full_link,
                     "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "is_new_listing": 1
+                    "is_new_listing": 1,
                 }
                 if insert_car(engine, car_data):
                     logger.info(f"[{SITE_VAVACARS}] HEDEFE UYAN ARAC BULUNDU: {title} - {price} TL")
@@ -419,18 +514,21 @@ def scrape_vavacars(engine, criteria, session_id: str = None):
 #  OTOKOÇ SCRAPER
 # ==========================================================================
 
+
 def scrape_otokoc(engine, criteria, session_id: str = None):
     """Otokoç 2. El için veri çekme (__NEXT_DATA__ JSON parse). GÖREV 2: session_id destekli."""
     if not session_id:
         session_id = str(uuid.uuid4())
 
     target_brand_slug = (
-        criteria['brand'].strip().lower().replace(" ", "-")
-        if criteria['brand'] and criteria['brand'] != "Tümü" else ""
+        criteria["brand"].strip().lower().replace(" ", "-")
+        if criteria["brand"] and criteria["brand"] != "Tümü"
+        else ""
     )
     url = (
         f"https://www.otokocikinciel.com/ikinci-el-araba/{target_brand_slug}"
-        if target_brand_slug else "https://www.otokocikinciel.com/ikinci-el-araba"
+        if target_brand_slug
+        else "https://www.otokocikinciel.com/ikinci-el-araba"
     )
 
     session = cf.Session()
@@ -445,7 +543,8 @@ def scrape_otokoc(engine, criteria, session_id: str = None):
 
         match = re.search(
             r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-            r.text, re.DOTALL | re.IGNORECASE
+            r.text,
+            re.DOTALL | re.IGNORECASE,
         )
         if not match:
             # BUG FIX: __NEXT_DATA__ bulunamazsa (sayfa yapısı değişmiş) artık bildirim gönderiliyor
@@ -462,11 +561,11 @@ def scrape_otokoc(engine, criteria, session_id: str = None):
             return
 
         # Güvenli nested dict erişimi — her seviyede tip kontrolü
-        props = data.get('props', {}) if isinstance(data, dict) else {}
-        pageProps = props.get('pageProps', {}) if isinstance(props, dict) else {}
-        iz = pageProps.get('initialZustandState', {}) if isinstance(pageProps, dict) else {}
-        listing = iz.get('listing', {}) if isinstance(iz, dict) else {}
-        vehicles = listing.get('results', []) if isinstance(listing, dict) else []
+        props = data.get("props", {}) if isinstance(data, dict) else {}
+        pageProps = props.get("pageProps", {}) if isinstance(props, dict) else {}
+        iz = pageProps.get("initialZustandState", {}) if isinstance(pageProps, dict) else {}
+        listing = iz.get("listing", {}) if isinstance(iz, dict) else {}
+        vehicles = listing.get("results", []) if isinstance(listing, dict) else []
 
         if not isinstance(vehicles, list):
             logger.error(f"[{SITE_OTOKOC}] 'results' alan beklenmeyen tipte: {type(vehicles)}")
@@ -489,13 +588,17 @@ def scrape_otokoc(engine, criteria, session_id: str = None):
 
                 trim = item.get("versionName", "")
 
-                if criteria['model'] and criteria['model'] != "Tümü" and criteria['model'].lower() not in model.lower():
+                if (
+                    criteria["model"]
+                    and criteria["model"] != "Tümü"
+                    and criteria["model"].lower() not in model.lower()
+                ):
                     continue
-                if price < criteria['min_price'] or price > criteria['max_price']:
+                if price < criteria["min_price"] or price > criteria["max_price"]:
                     continue
-                if year < criteria['min_year'] or year > criteria['max_year']:
+                if year < criteria["min_year"] or year > criteria["max_year"]:
                     continue
-                if km < criteria['min_km'] or km > criteria['max_km']:
+                if km < criteria["min_km"] or km > criteria["max_km"]:
                     continue
 
                 listing_id = str(item.get("id", ""))
@@ -505,7 +608,9 @@ def scrape_otokoc(engine, criteria, session_id: str = None):
                 if listing_exists(engine, listing_id):
                     continue
 
-                details = scrape_listing_details(session, link, allowed_parts=criteria.get("allowed_parts", []))
+                details = scrape_listing_details(
+                    session, link, allowed_parts=criteria.get("allowed_parts", [])
+                )
                 if details.get("rejected", False):
                     continue
 
@@ -514,15 +619,22 @@ def scrape_otokoc(engine, criteria, session_id: str = None):
                     continue
 
                 car_data = {
-                    "listing_id": listing_id, "source_site": SITE_OTOKOC,
-                    "brand": brand, "model": model, "package_trim": trim,
-                    "engine_power": "", "year": year, "km": km, "price": price,
-                    "location": item.get("cityName", ""), "tramer_fee": tramer,
+                    "listing_id": listing_id,
+                    "source_site": SITE_OTOKOC,
+                    "brand": brand,
+                    "model": model,
+                    "package_trim": trim,
+                    "engine_power": "",
+                    "year": year,
+                    "km": km,
+                    "price": price,
+                    "location": item.get("cityName", ""),
+                    "tramer_fee": tramer,
                     "painted_parts": details["painted_parts"],
                     "changed_parts": details["changed_parts"],
                     "link": link,
                     "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "is_new_listing": 1
+                    "is_new_listing": 1,
                 }
                 if insert_car(engine, car_data):
                     logger.info(f"[{SITE_OTOKOC}] HEDEFE UYAN ARAC BULUNDU: {brand} - {price} TL")
@@ -544,17 +656,20 @@ def scrape_otokoc(engine, criteria, session_id: str = None):
 #  ARABAM.COM SCRAPER
 # ==========================================================================
 
+
 def scrape_arabam(engine, criteria, session_id: str = None):
     """Arabam.com için veri çekme (SeleniumBase UC Mode). GÖREV 2: session_id destekli."""
     if not session_id:
         session_id = str(uuid.uuid4())
     target_brand_slug = (
-        criteria['brand'].strip().lower().replace(" ", "-")
-        if criteria['brand'] and criteria['brand'] != "Tümü" else ""
+        criteria["brand"].strip().lower().replace(" ", "-")
+        if criteria["brand"] and criteria["brand"] != "Tümü"
+        else ""
     )
     base_url = (
         f"https://www.arabam.com/ikinci-el/otomobil/{target_brand_slug}"
-        if target_brand_slug else "https://www.arabam.com/ikinci-el/otomobil"
+        if target_brand_slug
+        else "https://www.arabam.com/ikinci-el/otomobil"
     )
 
     params = (
@@ -565,22 +680,27 @@ def scrape_arabam(engine, criteria, session_id: str = None):
 
     try:
         from seleniumbase import SB
+
         with SB(uc=True, test=True, headless=True) as sb:
             sb.uc_open_with_reconnect(url, 4)
             time.sleep(SCRAPER_PAGE_WAIT_SEC)
             html = sb.get_page_source()
-            soup = BeautifulSoup(html, 'html.parser')
+            soup = BeautifulSoup(html, "html.parser")
 
             listing_links = []
-            for a in soup.find_all('a', href=True):
-                if '/ilan/' in a['href'] and '-satilik-' in a['href']:
-                    full_url = "https://www.arabam.com" + a['href'] if a['href'].startswith('/') else a['href']
+            for a in soup.find_all("a", href=True):
+                if "/ilan/" in a["href"] and "-satilik-" in a["href"]:
+                    full_url = (
+                        "https://www.arabam.com" + a["href"]
+                        if a["href"].startswith("/")
+                        else a["href"]
+                    )
                     if full_url not in listing_links:
                         listing_links.append(full_url)
 
             new_links = []
             for link in listing_links:
-                lid = link.split('/')[-1]
+                lid = link.split("/")[-1]
                 if not listing_exists(engine, lid):
                     new_links.append((lid, link))
                 if len(new_links) >= 3:
@@ -592,48 +712,71 @@ def scrape_arabam(engine, criteria, session_id: str = None):
                     sb.uc_open_with_reconnect(link, 4)
                     time.sleep(SCRAPER_PAGE_WAIT_SEC)
                     detail_html = sb.get_page_source()
-                    detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                    detail_soup = BeautifulSoup(detail_html, "html.parser")
 
                     price_div = detail_soup.find("div", {"class": "product-price"})
                     if not price_div:
                         price_div = detail_soup.find("span", {"class": "color-red4"})
 
-                    price_text = price_div.text.strip().replace(".", "").replace("TL", "").strip() if price_div else "0"
-                    price_digits = re.sub(r'\D', '', price_text)
+                    price_text = (
+                        price_div.text.strip().replace(".", "").replace("TL", "").strip()
+                        if price_div
+                        else "0"
+                    )
+                    price_digits = re.sub(r"\D", "", price_text)
                     price = _safe_int(price_digits) if price_digits else 0
 
-                    if price < criteria['min_price'] or price > criteria['max_price']:
+                    if price < criteria["min_price"] or price > criteria["max_price"]:
                         continue
 
                     title_h1 = detail_soup.find("h1")
                     title = title_h1.text.strip() if title_h1 else "Bilinmeyen Model"
 
-                    text_content = detail_soup.get_text(separator=' ').lower()
-                    damage_keywords = ["boyalı", "boyanmış", "boyalıdır", "değişen", "değişmiş", "hasar kaydı", "tramer kayıtlı"]
+                    text_content = detail_soup.get_text(separator=" ").lower()
+                    damage_keywords = [
+                        "boyalı",
+                        "boyanmış",
+                        "boyalıdır",
+                        "değişen",
+                        "değişmiş",
+                        "hasar kaydı",
+                        "tramer kayıtlı",
+                    ]
                     has_damage = any(kw in text_content for kw in damage_keywords)
 
                     if has_damage and len(criteria.get("allowed_parts", [])) == 0:
-                        logger.info(f"[{SITE_ARABAM}] SKIP - Hasar filtresine takildi: {title[:20]}")
+                        logger.info(
+                            f"[{SITE_ARABAM}] SKIP - Hasar filtresine takildi: {title[:20]}"
+                        )
                         continue
 
                     car_data = {
-                        "listing_id": listing_id, "source_site": SITE_ARABAM,
-                        "brand": criteria['brand'] if criteria['brand'] != "Tümü" else "Arabam",
-                        "model": title[:30], "package_trim": "",
+                        "listing_id": listing_id,
+                        "source_site": SITE_ARABAM,
+                        "brand": criteria["brand"] if criteria["brand"] != "Tümü" else "Arabam",
+                        "model": title[:30],
+                        "package_trim": "",
                         "engine_power": "",
-                        "year": _safe_int(criteria.get('min_year')),
-                        "km": _safe_int(criteria.get('min_km')),
+                        "year": _safe_int(criteria.get("min_year")),
+                        "km": _safe_int(criteria.get("min_km")),
                         "price": price,
-                        "location": "Bilinmiyor", "tramer_fee": 0,
-                        "painted_parts": "Detay İlanda (Arabam)" if has_damage else "Temiz Görünüyor",
+                        "location": "Bilinmiyor",
+                        "tramer_fee": 0,
+                        "painted_parts": (
+                            "Detay İlanda (Arabam)" if has_damage else "Temiz Görünüyor"
+                        ),
                         "changed_parts": "Detay İlanda",
                         "link": link,
                         "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "is_new_listing": 1
+                        "is_new_listing": 1,
                     }
                     if insert_car(engine, car_data):
-                        logger.info(f"[{SITE_ARABAM}] HEDEFE UYAN ARAC BULUNDU: {title[:20]} - {price} TL")
-                        send_desktop_notification(car_data["brand"], car_data["model"], price, car_data["painted_parts"])
+                        logger.info(
+                            f"[{SITE_ARABAM}] HEDEFE UYAN ARAC BULUNDU: {title[:20]} - {price} TL"
+                        )
+                        send_desktop_notification(
+                            car_data["brand"], car_data["model"], price, car_data["painted_parts"]
+                        )
 
                 except Exception as e:
                     # Tekil ilan hatası — logla, bildirim gönderme
@@ -651,6 +794,7 @@ def scrape_arabam(engine, criteria, session_id: str = None):
 #  SAHİBİNDEN SCRAPER (Devre dışı — Cloudflare + Captcha)
 # ==========================================================================
 
+
 def scrape_sahibinden(engine, criteria):
     """Sahibinden.com — güvenlik duvarı nedeniyle şu an devre dışı."""
     logger.warning(
@@ -662,6 +806,7 @@ def scrape_sahibinden(engine, criteria):
 # ==========================================================================
 #  TEK DÖNGÜ ÇALIŞTIRICI
 # ==========================================================================
+
 
 def run_one_cycle(engine, criteria, session_id: str = None):
     """

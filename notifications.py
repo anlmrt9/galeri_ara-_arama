@@ -8,6 +8,7 @@ Windows dışı platformlarda logger.warning ile loga düşer.
 
 import platform
 from datetime import datetime
+
 from config import SITE_FAILURE_NOTIFY_COOLDOWN_MINUTES
 from logger_setup import logger
 
@@ -29,6 +30,7 @@ def send_desktop_notification(brand, model, price, painted_parts):
     if platform.system() == "Windows":
         try:
             from win11toast import toast
+
             toast(title, message, app_id="OtoGaleri Avcı Bot")
         except Exception as e:
             logger.error(f"Bildirim gonderilemedi: {e}")
@@ -66,6 +68,7 @@ def send_site_failure_notification(site_name, reason):
     if platform.system() == "Windows":
         try:
             from win11toast import toast
+
             toast(title, message, app_id="OtoGaleri Avcı Bot")
         except Exception as e:
             logger.error(f"Site hata bildirimi gonderilemedi: {e}")

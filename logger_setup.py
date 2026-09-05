@@ -1,26 +1,44 @@
 """
 logger_setup.py - Merkezi Logger Konfigürasyonu
 =================================================
-Konsol + dosya çıktısı üreten tek bir logger objesi sağlar.
-Tüm modüller buradan import edilen logger'ı kullanır.
+Konsol + döner (rotating) dosya çıktısı üreten tek bir ``logger`` objesi sağlar.
+Tüm modüller buradan import edilen ``logger``'ı kullanır.
+
+Ayarlar ``config.settings`` üzerinden (ortam değişkeni / ``.env``):
+    OTOGALERI_LOG_LEVEL         (varsayılan INFO)
+    OTOGALERI_LOG_FILE          (varsayılan otogaleri_log.txt)
+    OTOGALERI_LOG_MAX_BYTES     (varsayılan 5 MB)
+    OTOGALERI_LOG_BACKUP_COUNT  (varsayılan 3)
 """
 
+from __future__ import annotations
+
 import logging
-from config import LOG_FILE
+from logging.handlers import RotatingFileHandler
+
+from config import settings
+
+_FORMAT = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
 
 logger = logging.getLogger("OtoGaleri")
-logger.setLevel(logging.INFO)
+logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+logger.propagate = False
 
 if not logger.handlers:
-    # Konsol handler
-    ch = logging.StreamHandler()
-    ch.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s'))
-    logger.addHandler(ch)
+    _formatter = logging.Formatter(_FORMAT)
 
-    # Dosya handler
+    _console = logging.StreamHandler()
+    _console.setFormatter(_formatter)
+    logger.addHandler(_console)
+
     try:
-        fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
-        fh.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s'))
-        logger.addHandler(fh)
-    except Exception as e:
-        logger.warning(f"Log dosyasi olusturulamadi ({LOG_FILE}): {e}")
+        _file = RotatingFileHandler(
+            settings.log_file,
+            maxBytes=settings.log_max_bytes,
+            backupCount=settings.log_backup_count,
+            encoding="utf-8",
+        )
+        _file.setFormatter(_formatter)
+        logger.addHandler(_file)
+    except OSError as exc:  # dosya sistemi salt-okunur / izin yok (ör. bazı bulut ortamları)
+        logger.warning("Log dosyasi olusturulamadi (%s): %s", settings.log_file, exc)

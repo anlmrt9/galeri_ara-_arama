@@ -1,0 +1,7 @@
+# Tüm metin dosyaları için tutarlı satır sonu (LF) — Windows'ta da.
+* text=auto eol=lf
+
+# İkili dosyalar
+*.png binary
+*.db binary
+*.ico binary

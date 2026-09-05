@@ -6,61 +6,76 @@ Belirlediğiniz kriterlere (marka, model, fiyat, yıl, kilometre, tramer) uyan i
 
 - **Çoklu site taraması:** Otoplus, VavaCars, Otokoç 2. El, Arabam.com ve Sahibinden üzerinde eş zamanlı arama.
 - **Filtreli arama:** Marka/model, min-max fiyat, min-max yıl, min-max kilometre ve maksimum kabul edilen tramer bedeline göre filtreleme.
-- **Arka planda tarama:** Belirlenen süre boyunca (varsayılan döngü aralığıyla) periyodik olarak tekrar taranır; `threading` ile arayüzü kilitlemeden çalışır.
+- **Arka planda tarama:** Belirlenen süre boyunca (varsayılan döngü aralığıyla) periyodik olarak tekrar taranır; `threading` ile arayüzü kilitlemeden çalışır. Tarama döngüsü tek bir yerde (`scan_service.run_scan_loop`) tanımlıdır; hem Streamlit hem REST API aynı mantığı kullanır.
+- **REST API:** `api.py` (FastAPI) aynı iş mantığını HTTP üzerinden sunar. İsteğe bağlı `X-API-Key` kimlik doğrulaması ve yapılandırılabilir CORS.
 - **Masaüstü bildirimleri:** Yeni araç bulunduğunda veya bir sitenin taraması başarısız olduğunda Windows toast bildirimi gönderir (Windows dışı ortamlarda log'a düşer).
 - **Checkpoint / oturum takibi:** Her tarama oturumu `session_id` ile izlenir, sayfa bazlı ilerleme `scan_sessions` tablosunda saklanır.
-- **Otomatik yeniden deneme:** Veritabanı ve HTTP istekleri için exponential backoff ile retry mekanizması.
-- **SQL Server tabanlı depolama:** Bulunan ilanlar `Cars` tablosunda saklanır, tekrarlanan ilanlar `listing_id` ile filtrelenir.
+- **Otomatik yeniden deneme:** Veritabanı ve HTTP istekleri için exponential backoff ile retry; yalnızca geçici (transient) hatalar tekrar denenir, kalıcı hatalar anında yükseltilir.
+- **Esnek depolama:** `DATABASE_URL` tanımlıysa PostgreSQL/Supabase, aksi halde yerel SQL Server. Bulunan ilanlar `Cars` tablosunda, tekrarlar `listing_id` ile filtrelenir.
+- **Merkezi yapılandırma:** Tüm ayarlar `pydantic-settings` ile `.env` / ortam değişkenlerinden okunur (`config.Settings`).
+- **Test + CI:** `pytest` test paketi, `ruff` + `black` + `mypy` ve GitHub Actions iş akışı.
 
 ## Proje Yapısı
 
 | Dosya | Açıklama |
 |---|---|
 | `app.py` | Ana Streamlit arayüzü. Kriter formu, tarama başlat/durdur kontrolü ve sonuç tablosu. |
+| `api.py` | FastAPI REST backend'i (mobil uygulama + entegrasyonlar için). API-key auth, CORS, graceful shutdown. |
+| `scan_service.py` | Paylaşılan katman: `ScanCriteria` modeli, `run_scan_loop` döngüsü, `ScanManager` (thread + kilit). |
 | `scrapers.py` | Her site için scraping fonksiyonları ve `run_one_cycle` döngüsü. |
-| `db.py` | SQLAlchemy/pyodbc ile SQL Server erişimi (tablo oluşturma, CRUD, checkpoint). |
-| `notifications.py` | Windows toast bildirim gönderimi (yeni araç / site hatası). |
-| `config.py` | Ortam değişkenleriyle override edilebilen merkezi ayarlar (DB, timeout, site listesi vb.). |
-| `logger_setup.py` | Uygulama genelinde kullanılan logger yapılandırması. |
-| `dashboard.py` | Otoplus'a özel, kendi içinde scraping yapan alternatif/eski Streamlit panosu (`streamlit run dashboard.py`). |
-| `car_map_component/` | Araç konumlarını haritada göstermek için kullanılan HTML bileşeni. |
-| `test_system.py` | Veritabanı bağlantısı gibi temel sistem kontrolleri için basit test betiği. |
-| `static/manifest.json` | PWA manifest'i (ikonlar, tema rengi, kısayollar). |
-| `static/sw.js` | Service worker: statik varlık önbellekleme + çevrimdışı sayfa yönlendirmesi. |
-| `static/offline.html` | Bağlantı yokken gösterilen çevrimdışı bilgilendirme ekranı. |
-| `static/splash/` | iOS "Ana Ekrana Ekle" sonrası açılışta gösterilen marka splash görselleri. |
-| `api.py` | Mobil uygulamanın konuştuğu FastAPI backend'i (aynı `config`/`db`/`scrapers` mantığını REST üzerinden sunar). |
+| `db.py` | SQLAlchemy ile PostgreSQL / SQL Server erişimi (tablo oluşturma, CRUD, checkpoint, retry dekoratörü). |
+| `notifications.py` | Windows toast bildirim gönderimi (yeni araç / site hatası) + cooldown. |
+| `config.py` | `pydantic-settings` tabanlı merkezi ayarlar (`Settings`) ve geriye dönük sabitler. |
+| `logger_setup.py` | Döner (rotating) dosya + konsol logger yapılandırması. |
+| `format_utils.py` | UI'dan bağımsız saf biçimlendirme yardımcıları (`format_try`). |
+| `car_map_component/` | İnteraktif araç hasar haritası HTML bileşeni. |
+| `tests/` | `pytest` test paketi (config, kriter modeli, retry, bildirim, API). |
+| `pyproject.toml` | Proje meta verisi + `ruff` / `black` / `mypy` / `pytest` yapılandırması. |
+| `.env.example` | Ortam değişkeni şablonu (`cp .env.example .env`). |
+| `Dockerfile`, `docker-compose.yml` | Konteynerli çalıştırma (PostgreSQL + API + Streamlit). |
+| `static/` | PWA katmanı: `manifest.json`, `sw.js`, `offline.html`, `splash/`, uygulama ikonları. |
 
 > **Not:** Expo (React Native) ile yazılmış gerçek mobil uygulama artık bu repoda değil, ayrı bir klasöre taşındı: `../otogaleri-mobile` (bu projeyle kardeş klasör). `api.py`'ye HTTP ile bağlanır.
 
 ## Gereksinimler
 
 - Python 3.10+
-- Microsoft SQL Server (yerel veya erişilebilir bir örnek) ve **ODBC Driver 17 for SQL Server**
+- Veritabanı: **ya** bir PostgreSQL bağlantısı (`DATABASE_URL`) **ya da** Microsoft SQL Server + **ODBC Driver 17 for SQL Server**
 - Windows (masaüstü bildirimleri için; diğer platformlarda bildirimler yerine log kaydı düşer)
-
-Gerekli Python paketleri `requirements.txt` içinde tanımlıdır:
+- VavaCars / Arabam.com scraper'ları için Chrome/Chromium (seleniumbase indirir)
 
 ```bash
+python -m venv .venv && . .venv/Scripts/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ## Kurulum
 
-1. Depoyu/klasörü indirin ve klasöre girin.
-2. Yukarıdaki bağımlılıkları kurun.
-3. SQL Server'ın çalıştığından ve `Trusted_Connection` (Windows Authentication) ile erişilebilir olduğundan emin olun. Gerekirse aşağıdaki ortam değişkenleriyle bağlantı bilgilerini özelleştirin:
+1. Depoyu/klasörü indirin ve klasöre girin, sanal ortam kurup bağımlılıkları yükleyin.
+2. Ortam değişkeni şablonunu kopyalayıp doldurun:
 
-   | Değişken | Varsayılan | Açıklama |
-   |---|---|---|
-   | `OTOGALERI_DB_SERVER` | `MERTPC\SQLEXPRESS` | SQL Server adresi |
-   | `OTOGALERI_DB_NAME` | `OtoGaleriDB` | Veritabanı adı (yoksa otomatik oluşturulur) |
-   | `OTOGALERI_TIMEOUT` | `15` | HTTP istek timeout (saniye) |
-   | `OTOGALERI_CYCLE_INTERVAL` | `60` | Tarama döngüleri arası bekleme (saniye) |
-   | `OTOGALERI_MAX_NEW` | `5` | Döngü başına eklenecek maksimum yeni ilan |
-   | `OTOGALERI_FAILURE_COOLDOWN` | `15` | Aynı site için hata bildirimi tekrar aralığı (dakika) |
+   ```bash
+   cp .env.example .env
+   ```
 
-   Diğer ayarlar için `config.py` dosyasına bakın.
+3. Veritabanını seçin:
+   - **PostgreSQL / Supabase:** `.env` içinde `DATABASE_URL` tanımlayın.
+   - **Yerel SQL Server (Windows):** `DATABASE_URL`'i boş bırakın; `OTOGALERI_DB_SERVER` / `OTOGALERI_DB_NAME` kullanılır (`Trusted_Connection`, veritabanı yoksa otomatik oluşturulur).
+
+En sık kullanılan ayarlar (tam liste `.env.example` ve `config.Settings` içinde):
+
+| Değişken | Varsayılan | Açıklama |
+|---|---|---|
+| `DATABASE_URL` | *(boş)* | Tanımlıysa PostgreSQL kullanılır; boşsa yerel SQL Server |
+| `OTOGALERI_DB_SERVER` | `MERTPC\SQLEXPRESS` | SQL Server adresi |
+| `OTOGALERI_DB_NAME` | `OtoGaleriDB` | Veritabanı adı (yoksa otomatik oluşturulur) |
+| `OTOGALERI_TIMEOUT` | `15` | HTTP istek timeout (saniye) |
+| `OTOGALERI_CYCLE_INTERVAL` | `60` | Tarama döngüleri arası bekleme (saniye) |
+| `OTOGALERI_MAX_NEW` | `5` | Döngü başına eklenecek maksimum yeni ilan |
+| `OTOGALERI_FAILURE_COOLDOWN` | `15` | Aynı site için hata bildirimi tekrar aralığı (dakika) |
+| `OTOGALERI_LOG_LEVEL` | `INFO` | Log seviyesi |
+| `OTOGALERI_API_KEY` | *(boş)* | Boşsa API auth kapalı; değer verilirse `X-API-Key` zorunlu |
+| `OTOGALERI_CORS_ORIGINS` | `*` | Virgülle ayrılmış izinli origin listesi |
 
 ## Çalıştırma
 
@@ -76,11 +91,53 @@ Uygulama açıldıktan sonra:
 4. Bulunan ilanlar otomatik yenilenen tabloda listelenir; yeni ilan bulundukça masaüstü bildirimi alırsınız.
 5. Taramayı durdurmak için **"Tarama Oturumunu Sonlandır"** butonunu kullanın.
 
-Alternatif olarak, yalnızca Otoplus için kendi içinde scraping yapan eski panoyu çalıştırmak isterseniz:
+## REST API
 
 ```bash
-streamlit run dashboard.py
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
+
+İnteraktif dokümantasyon: `http://localhost:8000/docs`
+
+| Metot & Uç | Auth | Açıklama |
+|---|---|---|
+| `GET /api/health` | — | Veritabanı bağlantı durumu |
+| `GET /api/config` | — | Site listesi, marka/model kataloğu, hasar parçaları, döngü aralığı |
+| `GET /api/listings` | API-key | Tüm ilanlar + toplam/yeni sayıları |
+| `DELETE /api/listings` | API-key | Tüm ilanları siler |
+| `GET /api/scan/status` | API-key | Aktif tarama var mı, `session_id`, başlangıç zamanı |
+| `POST /api/scan/start` | API-key | `ScanCriteria` gövdesiyle tarama başlatır (aktif tarama varsa `409`) |
+| `POST /api/scan/stop` | API-key | Aktif taramayı nazikçe durdurur |
+
+`OTOGALERI_API_KEY` tanımlıysa "API-key" işaretli uçlar `X-API-Key: <anahtar>` başlığı ister.
+`OTOGALERI_API_KEY` boşsa kimlik doğrulama kapalıdır — bu yalnızca güvenli yerel ağ içindir.
+
+## Docker ile Çalıştırma
+
+```bash
+docker compose up --build
+```
+
+PostgreSQL + REST API (`:8000`) + Streamlit (`:8501`) birlikte ayağa kalkar.
+`OTOGALERI_API_KEY` gibi değişkenleri host ortamınızdan veya bir `.env` dosyasından geçirebilirsiniz.
+
+> `curl_cffi` tabanlı Otoplus/Otokoç scraper'ları konteynerde sorunsuz çalışır.
+> VavaCars/Arabam scraper'ları için imajda `chromium` kuruludur ancak headless "UC mode"
+> her konteyner ortamında güvenilir olmayabilir.
+
+## Geliştirme
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pre-commit install          # commit öncesi ruff + black + kontroller
+
+pytest                      # testler
+ruff check .                # lint
+black --check .             # biçim kontrolü
+mypy scan_service.py config.py
+```
+
+CI (`.github/workflows/ci.yml`) her push/PR'da lint + biçim + test çalıştırır.
 
 ## Bulut Dağıtımı (Streamlit Community Cloud + Supabase)
 
@@ -95,7 +152,7 @@ Proje, yerel SQL Server yerine bulut tabanlı bir PostgreSQL (Supabase) veritaba
    ```
 5. Deploy tamamlandığında size `https://<uygulama-adi>.streamlit.app` şeklinde herkese açık bir adres verilir.
 
-**Önemli sınırlamalar:** Streamlit Community Cloud'un ücretsiz katmanı, uzun süre çalışan arka plan iş parçacıkları (`background_scan_thread`) için tasarlanmamıştır — uygulama bir süre etkileşim almazsa konteyner uyku moduna geçer ve aktif tarama durur. Ayrıca VavaCars ve Arabam.com scraperları `seleniumbase` ile gerçek bir Chrome tarayıcısı gerektirir; bu, Community Cloud'un varsayılan ortamında güvenilir çalışmayabilir. `curl_cffi` tabanlı Otoplus scraper'ı bu kısıtlamalardan etkilenmez. Kesintisiz 7/24 tarama için yerel çalıştırma (veya kendi sunucunuz) hâlâ en güvenilir yöntemdir; bulut dağıtımı daha çok "istediğiniz an açıp sonuçlara bakma" senaryosu için uygundur.
+**Önemli sınırlamalar:** Streamlit Community Cloud'un ücretsiz katmanı, uzun süre çalışan arka plan iş parçacıkları (`scan_service.run_scan_loop`) için tasarlanmamıştır — uygulama bir süre etkileşim almazsa konteyner uyku moduna geçer ve aktif tarama durur. Ayrıca VavaCars ve Arabam.com scraperları `seleniumbase` ile gerçek bir Chrome tarayıcısı gerektirir; bu, Community Cloud'un varsayılan ortamında güvenilir çalışmayabilir. `curl_cffi` tabanlı Otoplus scraper'ı bu kısıtlamalardan etkilenmez. Kesintisiz 7/24 tarama için yerel çalıştırma (veya kendi sunucunuz) hâlâ en güvenilir yöntemdir; bulut dağıtımı daha çok "istediğiniz an açıp sonuçlara bakma" senaryosu için uygundur.
 
 ## Gerçek Mobil Uygulama (FastAPI + Expo/React Native)
 
