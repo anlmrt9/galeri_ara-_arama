@@ -12,6 +12,16 @@
   "orientation": "portrait",
   "background_color": "#0f1225",
   "theme_color": "#0f1225",
+  "categories": ["business", "utilities", "shopping"],
+  "shortcuts": [
+    {
+      "name": "Taramayı Başlat",
+      "short_name": "Başlat",
+      "description": "Hedef araç kriterleri formuna git",
+      "url": "/?utm_source=pwa_shortcut#hedef-arac-ozellikleri",
+      "icons": [{ "src": "app/static/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "app/static/icon-192.png",

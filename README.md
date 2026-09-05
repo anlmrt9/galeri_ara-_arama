@@ -25,6 +25,12 @@ Belirlediğiniz kriterlere (marka, model, fiyat, yıl, kilometre, tramer) uyan i
 | `dashboard.py` | Otoplus'a özel, kendi içinde scraping yapan alternatif/eski Streamlit panosu (`streamlit run dashboard.py`). |
 | `car_map_component/` | Araç konumlarını haritada göstermek için kullanılan HTML bileşeni. |
 | `test_system.py` | Veritabanı bağlantısı gibi temel sistem kontrolleri için basit test betiği. |
+| `static/manifest.json` | PWA manifest'i (ikonlar, tema rengi, kısayollar). |
+| `static/sw.js` | Service worker: statik varlık önbellekleme + çevrimdışı sayfa yönlendirmesi. |
+| `static/offline.html` | Bağlantı yokken gösterilen çevrimdışı bilgilendirme ekranı. |
+| `static/splash/` | iOS "Ana Ekrana Ekle" sonrası açılışta gösterilen marka splash görselleri. |
+| `api.py` | Mobil uygulamanın konuştuğu FastAPI backend'i (aynı `config`/`db`/`scrapers` mantığını REST üzerinden sunar). |
+| `mobile/` | Expo (React Native) ile yazılmış gerçek mobil uygulama; `api.py`'ye HTTP ile bağlanır. |
 
 ## Gereksinimler
 
@@ -90,14 +96,51 @@ Proje, yerel SQL Server yerine bulut tabanlı bir PostgreSQL (Supabase) veritaba
 
 **Önemli sınırlamalar:** Streamlit Community Cloud'un ücretsiz katmanı, uzun süre çalışan arka plan iş parçacıkları (`background_scan_thread`) için tasarlanmamıştır — uygulama bir süre etkileşim almazsa konteyner uyku moduna geçer ve aktif tarama durur. Ayrıca VavaCars ve Arabam.com scraperları `seleniumbase` ile gerçek bir Chrome tarayıcısı gerektirir; bu, Community Cloud'un varsayılan ortamında güvenilir çalışmayabilir. `curl_cffi` tabanlı Otoplus scraper'ı bu kısıtlamalardan etkilenmez. Kesintisiz 7/24 tarama için yerel çalıştırma (veya kendi sunucunuz) hâlâ en güvenilir yöntemdir; bulut dağıtımı daha çok "istediğiniz an açıp sonuçlara bakma" senaryosu için uygundur.
 
+## Gerçek Mobil Uygulama (FastAPI + Expo/React Native)
+
+Streamlit'e ek olarak, aynı veritabanını kullanan gerçek bir mobil uygulama da mevcuttur: telefona kurulan, kendi ikonuyla açılan, sekmeli (Ana Sayfa / Filtreler / Sonuçlar / Ayarlar) bir React Native uygulaması. İş mantığı (scraping, veritabanı, bildirim) değişmedi — `api.py` bunu ince bir REST katmanıyla mobil uygulamaya açar.
+
+### 1. Backend'i başlatın (bilgisayarınızda)
+
+```bash
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+Bilgisayarınızın yerel ağ IP adresini öğrenin (Windows'ta `ipconfig` → "IPv4 Address"), örn. `192.168.1.10`.
+
+### 2. Mobil uygulamayı çalıştırın
+
+```bash
+cd mobile
+npm install   # ilk seferde
+npx expo start
+```
+
+Telefonunuza **Expo Go** uygulamasını kurun (Play Store / App Store), terminalde çıkan QR kodu okutun — telefon ve bilgisayar aynı Wi-Fi ağında olmalı. Uygulama açıldığında **Ayarlar** sekmesinden backend adresinizi girin: `http://192.168.1.10:8000` (yukarıda bulduğunuz IP).
+
+### Neler çalışır / neler çalışmaz
+
+- ✅ Marka/model/fiyat/yıl/km/tramer filtreleri, site seçimi, hasar haritası (13 parça, dokunarak orijinal→boyalı→değişen), tarama başlat/durdur/temizle, canlı sonuç listesi — hepsi Streamlit arayüzüyle birebir aynı mantığı kullanır.
+- ✅ Uygulama açıkken/arka planda çalışırken periyodik kontrol (polling) ile yeni ilan bulunduğunda **yerel bildirim** gösterilir.
+- ⚠️ Uygulama tamamen kapalıyken gerçek push bildirimi (masaüstündeki toast'ın tam karşılığı) bu sürümde yok — Expo Go artık uzak push'u desteklemiyor; bunun için ileride `eas build` ile bir development build gerekir.
+- ⚠️ Play Store/App Store'a **yayınlamak** için `eas build` ile native paket (APK/IPA) üretmek ayrı bir adımdır (hesap/imzalama gerektirir); bu proje buna hazır şekilde (yönetilen Expo iş akışı) kuruldu.
+- ℹ️ Mobil uygulama backend'e düz HTTP ile bağlanır — aynı Wi-Fi/ev ağı kullanımı için tasarlandı. İnternetten (ev ağı dışından) erişim isterseniz backend'i bir sunucuya deploy edip HTTPS arkasına almanız gerekir.
+
 ## Mobil Uygulama Olarak Kurulum (PWA)
 
-Uygulama, telefonunuzda gerçek bir uygulama gibi görünüp açılabilmesi için bir **Progressive Web App (PWA)** katmanıyla donatılmıştır (`static/manifest.json`, `static/sw.js`, uygulama ikonları). Bulutta deploy ettikten sonra (HTTPS zorunludur, bu yüzden yerel `localhost` üzerinde "Ana Ekrana Ekle" çalışmaz):
+Yukarıdaki gerçek mobil uygulamaya ek olarak, kurulum gerektirmeyen daha hafif bir alternatif de mevcuttur: Streamlit arayüzünün kendisi bir PWA olarak da açılabilir.
 
-- **Android (Chrome):** Uygulama adresini açın → sağ üstteki ⋮ menüsü → **"Uygulamayı yükle"** veya **"Ana ekrana ekle"**.
-- **iPhone (Safari):** Uygulama adresini açın → paylaş simgesi (□↑) → **"Ana Ekrana Ekle"**.
+Uygulama, telefonunuzda gerçek bir uygulama gibi görünüp açılabilmesi için tam donanımlı bir **Progressive Web App (PWA)** katmanıyla donatılmıştır (`static/manifest.json`, `static/sw.js`, `static/offline.html`, `static/splash/`, uygulama ikonları). Bulutta deploy ettikten sonra (HTTPS zorunludur, bu yüzden yerel `localhost` üzerinde "Ana Ekrana Ekle" çalışmaz):
 
-Ekleme sonrası uygulama kendi ikonuyla, adres çubuğu olmadan tam ekran açılır. Streamlit'in statik dosya sunumundaki kısıtlama nedeniyle service worker'ın kapsamı `/app/static/` ile sınırlı kalır (bu yalnızca çevrimdışı önbellekleme özelliğini etkiler); ana ekrana ekleme, ikon ve tam ekran açılış davranışı bundan etkilenmez.
+- **Android (Chrome):** Uygulama adresini açın → sağ üstteki ⋮ menüsü → **"Uygulamayı yükle"** veya **"Ana ekrana ekle"** (ekranın altında beliren **📲 Uygulamayı Yükle** butonuyla da tetiklenebilir).
+- **iPhone (Safari):** Uygulama adresini açın → paylaş simgesi (□↑) → **"Ana Ekrana Ekle"** (ilk ziyarette ekranın altında bu adımları gösteren bir ipucu belirir).
+
+Ekleme sonrası uygulama kendi ikonuyla, adres çubuğu olmadan tam ekran açılır. PWA katmanı şunları içerir:
+
+- **Marka splash ekranı:** iOS'ta uygulama açılırken varsayılan boş beyaz ekran yerine `static/splash/` altındaki, tüm yaygın iPhone/iPad çözünürlükleri için üretilmiş koyu lacivert + logo splash görseli gösterilir.
+- **Çevrimdışı ekranı:** Service worker sayfa yüklemesini önce ağdan dener; bağlantı yoksa `static/offline.html` içindeki "İnternet bağlantısı yok / Tekrar Dene" ekranını gösterir. Streamlit'in statik dosya sunumu kısıtlaması nedeniyle asıl (dinamik) sayfa tam olarak önbelleklenemez — bu yüzden çevrimdışıyken uygulama içeriği değil, bu bilgilendirme ekranı görünür. İkon/manifest/splash gibi statik varlıklar ise cache-first stratejisiyle önbelleklenir.
+- **Kısayol (shortcut):** Android'de uygulama ikonuna uzun basıldığında doğrudan "Taramayı Başlat" formuna atlayan bir kısayol menüsü çıkar.
+- **Dokunsal geri bildirim:** Hızlı işlem butonlarına (Başlat/Durdur/Temizle/Yenile) dokunulduğunda destekleyen cihazlarda hafif bir titreşimle native-app hissi verilir.
 
 ## Notlar
 

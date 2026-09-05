@@ -1,14 +1,17 @@
 // OtoGaleri Avcı Botu - service worker
 // Streamlit statik dosya sunumu kısıtlaması nedeniyle kapsam /app/static/ ile
-// sınırlıdır; bu yüzden yalnızca ikonlar/manifest gibi statik varlıkları
-// önbellekler (cache-first). Uygulamanın asıl (dinamik) sayfası bu kapsamın
-// dışında kaldığından çevrimdışı çalışmaz - bu SW yalnızca "yüklenebilirlik"
-// şartını karşılar ve statik varlık önbelleklemesini iyileştirir.
-const CACHE_NAME = "otogaleri-static-v2";
+// sınırlıdır; uygulamanın asıl (dinamik) sayfası önbelleklenemez, bu yüzden
+// tam çevrimdışı çalışma mümkün değildir. Bunun yerine iki şey yapılır:
+//  1. Statik varlıklar (ikon/manifest/splash) cache-first önbelleklenir.
+//  2. Sayfa navigasyonu ağ hatası verdiğinde kullanıcı dostu bir "çevrimdışı"
+//     ekranı gösterilir (offline.html), boş beyaz ekran yerine.
+const CACHE_NAME = "otogaleri-static-v4";
+const OFFLINE_URL = "/app/static/offline.html";
 const PRECACHE_URLS = [
-  "app/static/manifest.json",
-  "app/static/icon-192.png",
-  "app/static/icon-512.png",
+  "/app/static/manifest.json",
+  "/app/static/icon-192.png",
+  "/app/static/icon-512.png",
+  OFFLINE_URL,
 ];
 
 self.addEventListener("install", (event) => {
@@ -28,22 +31,31 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-  const isStaticAsset = url.pathname.includes("/app/static/");
+  const request = event.request;
+  if (request.method !== "GET") return;
 
-  if (!isStaticAsset || event.request.method !== "GET") {
-    event.respondWith(fetch(event.request));
+  // Sayfa navigasyonu: ağ önce, hata olursa çevrimdışı ekranını göster.
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(() =>
+        caches.match(OFFLINE_URL).then((cached) => cached || Response.error())
+      )
+    );
     return;
   }
 
+  const url = new URL(request.url);
+  const isStaticAsset = url.pathname.includes("/app/static/");
+  if (!isStaticAsset) return; // diğer istekler tarayıcının varsayılan davranışına bırakılır
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    caches.match(request).then((cached) => {
       if (cached) return cached;
-      return fetch(event.request).then((response) => {
+      return fetch(request).then((response) => {
         const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
         return response;
       });
-    }).catch(() => fetch(event.request))
+    }).catch(() => caches.match(OFFLINE_URL))
   );
 });

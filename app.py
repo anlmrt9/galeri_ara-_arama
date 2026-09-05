@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 
-from config import ALL_SITES, SCRAPER_CYCLE_INTERVAL_SEC
+from config import ALL_SITES, SCRAPER_CYCLE_INTERVAL_SEC, CAR_CATALOG, DAMAGE_PARTS
 from logger_setup import logger
 from db import get_engine, init_tables, load_data, mark_all_as_seen, clear_all
 from scrapers import run_one_cycle
@@ -113,6 +113,35 @@ pwa_components.html("""
         if (viewport && viewport.content.indexOf('viewport-fit') === -1) {
             viewport.content = viewport.content + ', viewport-fit=cover';
         }
+
+        // ---- iOS: uygulama açılırken beyaz flaş yerine marka splash ekranı ----
+        const SPLASH_SCREENS = [
+            ['se1', 320, 568, 2], ['iphone8', 375, 667, 2], ['iphonex', 375, 812, 3],
+            ['iphone12', 390, 844, 3], ['iphone14pro', 393, 852, 3],
+            ['iphone8plus', 414, 736, 3], ['iphonexr', 414, 896, 2], ['iphonexsmax', 414, 896, 3],
+            ['iphone12promax', 428, 926, 3], ['iphone14promax', 430, 932, 3],
+            ['ipad97', 768, 1024, 2], ['ipad102', 810, 1080, 2],
+            ['ipadpro11', 834, 1194, 2], ['ipadpro129', 1024, 1366, 2],
+        ];
+        SPLASH_SCREENS.forEach(function(s) {
+            const [name, w, h, ratio] = s;
+            const link = doc.createElement('link');
+            link.rel = 'apple-touch-startup-image';
+            link.href = `app/static/splash/${name}.png`;
+            link.media = `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${ratio}) and (orientation: portrait)`;
+            doc.head.appendChild(link);
+        });
+    }
+
+    // ---- Dokunuşlarda hafif titreşim geri bildirimi (destekleyen cihazlarda) ----
+    if (!doc.body.dataset.hapticsBound) {
+        doc.body.dataset.hapticsBound = '1';
+        doc.body.addEventListener('click', function(e) {
+            const target = e.target.closest('.qa-btn button, .qa-anchor, .primary-btn button');
+            if (target && win.navigator.vibrate) {
+                win.navigator.vibrate(10);
+            }
+        }, true);
     }
 
     if ('serviceWorker' in win.navigator) {
@@ -582,26 +611,6 @@ st.markdown('<div class="parameter-card">', unsafe_allow_html=True)
 # Form header
 st.markdown('<div class="parameter-header">🎯 Hedef Araç Özellikleri</div>', unsafe_allow_html=True)
 
-CAR_CATALOG = {
-    "Audi": ["A3", "A4", "A5", "A6", "Q2", "Q3", "Q5", "Q7"],
-    "BMW": ["1 Serisi", "2 Serisi", "3 Serisi", "4 Serisi", "5 Serisi", "X1", "X3", "X5"],
-    "Citroen": ["C-Elysee", "C3", "C3 Aircross", "C4", "C5 Aircross"],
-    "Dacia": ["Duster", "Sandero", "Sandero Stepway", "Logan"],
-    "Fiat": ["Egea", "Fiorino", "Linea", "Punto", "Doblo"],
-    "Ford": ["Focus", "Fiesta", "Courier", "Puma", "Kuga", "Mondeo"],
-    "Honda": ["Civic", "CR-V", "City", "Accord"],
-    "Hyundai": ["i20", "Tucson", "Bayon", "Elantra", "Accent Blue", "i10"],
-    "Mercedes-Benz": ["A-Serisi", "B-Serisi", "C-Serisi", "E-Serisi", "CLA", "GLA"],
-    "Opel": ["Astra", "Corsa", "Crossland", "Mokka", "Insignia"],
-    "Peugeot": ["208", "2008", "308", "3008", "508", "Rifter"],
-    "Renault": ["Megane", "Clio", "Symbol", "Taliant", "Captur", "Kadjar"],
-    "Seat": ["Leon", "Ibiza", "Arona", "Ateca"],
-    "Skoda": ["Octavia", "Superb", "Scala", "Kamiq", "Karoq"],
-    "Toyota": ["Corolla", "Yaris", "C-HR", "Auris", "RAV4"],
-    "Volkswagen": ["Passat", "Golf", "Polo", "T-Roc", "Tiguan", "Jetta", "Caddy"],
-    "Volvo": ["S60", "S90", "XC40", "XC60", "XC90"]
-}
-
 # Grid parameters
 grid_col1, grid_col2 = st.columns(2)
 
@@ -648,14 +657,8 @@ car_state = car_map(key="car_map", default=None)
 
 allowed_parts = []
 if car_state:
-    # Map component keys to scraper keys
-    mapping = {
-        "kaput": "kaput", "tavan": "tavan", "bagaj": "bagaj",
-        "sol_on_cam": "sol ön çamurluk", "sag_on_cam": "sağ ön çamurluk",
-        "sol_on_kapi": "sol ön kapı", "sag_on_kapi": "sağ ön kapı",
-        "sol_arka_kapi": "sol arka kapı", "sag_arka_kapi": "sağ arka kapı",
-        "sol_arka_cam": "sol arka çamurluk", "sag_arka_cam": "sağ arka çamurluk"
-    }
+    # Map component keys to scraper keys (tek kaynak: config.DAMAGE_PARTS)
+    mapping = {p["id"]: p["scraper_key"] for p in DAMAGE_PARTS if p["scraper_key"]}
     for js_key, val in car_state.items():
         if val in ["boyali", "degisen"]:
             if js_key in mapping:
