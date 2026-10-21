@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "otogaleri-avci-botu"
-version = "1.0.0"
-description = "Kriterlere uyan ikinci el araç ilanlarını çoklu galeri/pazaryeri sitesinden tarayan sourcing botu (Streamlit + FastAPI)."
+dynamic = ["version"]
+description = "Kriterlere uyan ikinci el araç ilanlarını çoklu galeri/pazaryeri sitesinden tarayan sourcing botu (Streamlit + FastAPI + worker)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -13,11 +13,11 @@ authors = [{ name = "Anıl Mert" }]
 keywords = ["scraping", "streamlit", "fastapi", "cars", "sourcing"]
 
 dependencies = [
-    "streamlit>=1.35,<2",
-    "streamlit-autorefresh>=1.0,<2",
+    "streamlit>=1.40,<2",
     "fastapi>=0.110,<1",
     "uvicorn[standard]>=0.29,<1",
     "sqlalchemy>=2.0,<3",
+    "alembic>=1.13,<2",
     "pandas>=2.0,<3",
     "beautifulsoup4>=4.12,<5",
     "lxml>=4.9",
@@ -26,12 +26,12 @@ dependencies = [
     "psycopg2-binary>=2.9,<3",
     "pydantic>=2.6,<3",
     "pydantic-settings>=2.2,<3",
-    "python-dotenv>=1.0,<2",
     "pyodbc>=5.0 ; sys_platform == 'win32'",
     "win11toast>=0.35 ; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
+sentry = ["sentry-sdk>=2.0"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -42,44 +42,101 @@ dev = [
     "pre-commit>=3.7",
 ]
 
+[project.scripts]
+otogaleri-worker = "otogaleri.worker:main"
+
 [project.urls]
 Repository = "https://github.com/anlmrt9/galeri_ara-_arama"
 
-[tool.setuptools]
-py-modules = ["config", "db", "scrapers", "notifications", "logger_setup", "scan_service", "api", "app"]
+[tool.setuptools.dynamic]
+version = { attr = "otogaleri.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["otogaleri*"]
+
+# ---------------------------------------------------------------- ruff
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+extend-exclude = ["migrations/script.py.mako"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+select = [
+    "E", "F", "I", "UP", "B", "C4", "SIM",
+    "BLE",   # flake8-blind-except — her geniş "except Exception" gerekçeli olmalı
+    "G",     # flake8-logging-format — logger çağrılarında lazy % kullan
+    "LOG",   # flake8-logging
+    "PT",    # flake8-pytest-style
+    "RET",   # flake8-return
+    "PIE",   # flake8-pie
+    "RUF",   # ruff'a özgü kurallar
+    "PLE",   # pylint hataları
+    "PLW",   # pylint uyarıları
+    "PLC",   # pylint kuralları
+    "S",     # flake8-bandit (güvenlik)
+]
 ignore = [
-    "E501",    # satır uzunluğu — black/format hallediyor
+    "E501",    # satır uzunluğu — black hallediyor
     "B008",    # FastAPI Depends(...) default arg deseni
-    "SIM102",  # iç içe if — bazı scraper filtrelerinde okunurluğu artırıyor
+    "SIM102",  # iç içe if — filtrelerde okunurluk
+    "SIM105",  # try/except/pass — okunurluk tercih
+    "RUF001",  # Türkçe metinlerde "ambiguous" Unicode uyarıları
+    "RUF002",
+    "RUF003",
+    "PLC0415", # bilinçli gecikmeli import'lar (seleniumbase, win11toast, alembic)
+    "PLW0603", # logging_setup'taki tek seferlik global bayrak
+    "S310",    # urllib.urlopen: yalnızca sabit https Telegram adresi
+    "S608",    # SQL f-string uyarısı: tüm sorgular SQLAlchemy Core / parametreli
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+"tests/*" = ["S101", "S105", "S106", "PT011", "PT018", "PLW0108"]
+"migrations/*" = ["S"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["otogaleri"]
+
+# ---------------------------------------------------------------- black
 
 [tool.black]
 line-length = 100
 target-version = ["py310"]
 
+# ---------------------------------------------------------------- mypy
+
 [tool.mypy]
 python_version = "3.10"
+packages = ["otogaleri"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 ignore_missing_imports = true
 check_untyped_defs = true
-# Kademeli tipleme: mevcut modüller strict değil, yeni modüller sıkı.
-[[tool.mypy.overrides]]
-module = ["scan_service", "config"]
 disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["otogaleri.ui.*"]
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------- pytest / coverage
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+branch = true
+source = ["otogaleri"]
+omit = [
+    "otogaleri/ui/pwa.py",          # yalnızca tarayıcıya JS enjekte eder
+]
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

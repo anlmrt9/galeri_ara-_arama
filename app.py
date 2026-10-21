@@ -1,823 +1,516 @@
-"""
-app.py - OtoGaleriBot Streamlit Arayüzü (Neo-Fintech Redesign)
-================================================================
-Sadece UI katmanı. İş mantığı scrapers.py, db.py, notifications.py'de.
-Monzo/Revolut tarzı koyu lacivert (neo-fintech) tasarımı uygular.
+"""Streamlit arayüzü — ``streamlit run app.py``
+
+Yalnızca görünüm katmanıdır: tarama işleri ``ScanManager`` üzerinden veritabanına
+yazılır ve worker tarafından yürütülür. Sayfa yenilense ya da birden fazla sekme
+açılsa da tek bir tarama vardır ve her zaman durdurulabilir.
 """
 
-import threading
-import uuid
-from datetime import datetime
+from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from pydantic import ValidationError
-from streamlit.runtime.scriptrunner import add_script_run_ctx
-from streamlit_autorefresh import st_autorefresh
 
-from config import ALL_SITES, CAR_CATALOG, DAMAGE_PARTS, SCRAPER_CYCLE_INTERVAL_SEC
-from db import clear_all, get_engine, init_tables, load_data
-from format_utils import format_try
-from scan_service import ScanCriteria, run_scan_loop
-
-# ==========================================================================
-#  ARKA PLAN TARAMA THREAD'İ
-# ==========================================================================
-
-
-def _run_scan(engine, criteria: ScanCriteria, stop_event: threading.Event) -> None:
-    """Streamlit arka plan thread'i — ortak tarama döngüsünü çağırır."""
-    session_id = str(uuid.uuid4())
-    run_scan_loop(engine, criteria, stop_event, session_id, label="Streamlit")
-
-
-# ==========================================================================
-#  STREAMLIT CONFIG & NEO-FINTECH DARK THEME
-# ==========================================================================
-
-st.set_page_config(
-    page_title="OtoGaleri Avcı Botu | Sourcing Infrastructure", layout="wide", page_icon="🎯"
+from otogaleri import __version__
+from otogaleri.config import (
+    ALL_SITES,
+    ANY,
+    CAR_CATALOG,
+    SITES,
+    available_sites,
+    get_settings,
+    site_ready,
 )
+from otogaleri.db import Repository, create_db_engine, init_db
+from otogaleri.formatting import format_number, format_price, humanize_delta, to_local
+from otogaleri.logging_setup import configure_logging
+from otogaleri.scan import ScanCriteria
+from otogaleri.scoring import annotate
+from otogaleri.ui.pwa import inject_pwa
+from otogaleri.ui.render import CSS, listing_card, site_chip
+from otogaleri.worker import ScanAlreadyRunningError, ScanManager
 
-# Scan aktifse otomatik yenile
-if st.session_state.get("scan_active", False):
-    st_autorefresh(interval=15000, key="datarefresh")
-
-if "display_id" not in st.session_state:
-    st.session_state.display_id = str(uuid.uuid4())[:4].upper()
-
-# ==========================================================================
-#  PWA: manifest + service worker (telefonda "Ana Ekrana Ekle" desteği)
-# ==========================================================================
-components.html(
-    """
-<script>
-(function() {
-    const doc = window.parent.document;
-    const win = window.parent;
-
-    function addMeta(name, content) {
-        if (doc.querySelector(`meta[name="${name}"]`)) return;
-        const m = doc.createElement('meta');
-        m.name = name;
-        m.content = content;
-        doc.head.appendChild(m);
-    }
-
-    if (!doc.getElementById('pwa-manifest')) {
-        const manifest = doc.createElement('link');
-        manifest.id = 'pwa-manifest';
-        manifest.rel = 'manifest';
-        manifest.href = 'app/static/manifest.json';
-        doc.head.appendChild(manifest);
-
-        const appleTouchIcon = doc.createElement('link');
-        appleTouchIcon.rel = 'apple-touch-icon';
-        appleTouchIcon.href = 'app/static/icon-192.png';
-        doc.head.appendChild(appleTouchIcon);
-
-        addMeta('theme-color', '#0f1225');
-        addMeta('mobile-web-app-capable', 'yes');
-        addMeta('apple-mobile-web-app-capable', 'yes');
-        addMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
-        addMeta('apple-mobile-web-app-title', 'OtoGaleri');
-        addMeta('format-detection', 'telephone=no');
-
-        const viewport = doc.querySelector('meta[name="viewport"]');
-        if (viewport && viewport.content.indexOf('viewport-fit') === -1) {
-            viewport.content = viewport.content + ', viewport-fit=cover';
-        }
-
-        // ---- iOS: uygulama açılırken beyaz flaş yerine marka splash ekranı ----
-        const SPLASH_SCREENS = [
-            ['se1', 320, 568, 2], ['iphone8', 375, 667, 2], ['iphonex', 375, 812, 3],
-            ['iphone12', 390, 844, 3], ['iphone14pro', 393, 852, 3],
-            ['iphone8plus', 414, 736, 3], ['iphonexr', 414, 896, 2], ['iphonexsmax', 414, 896, 3],
-            ['iphone12promax', 428, 926, 3], ['iphone14promax', 430, 932, 3],
-            ['ipad97', 768, 1024, 2], ['ipad102', 810, 1080, 2],
-            ['ipadpro11', 834, 1194, 2], ['ipadpro129', 1024, 1366, 2],
-        ];
-        SPLASH_SCREENS.forEach(function(s) {
-            const [name, w, h, ratio] = s;
-            const link = doc.createElement('link');
-            link.rel = 'apple-touch-startup-image';
-            link.href = `app/static/splash/${name}.png`;
-            link.media = `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${ratio}) and (orientation: portrait)`;
-            doc.head.appendChild(link);
-        });
-    }
-
-    // ---- Dokunuşlarda hafif titreşim geri bildirimi (destekleyen cihazlarda) ----
-    if (!doc.body.dataset.hapticsBound) {
-        doc.body.dataset.hapticsBound = '1';
-        doc.body.addEventListener('click', function(e) {
-            const target = e.target.closest('.qa-btn button, .qa-anchor, .primary-btn button');
-            if (target && win.navigator.vibrate) {
-                win.navigator.vibrate(10);
-            }
-        }, true);
-    }
-
-    if ('serviceWorker' in win.navigator) {
-        win.navigator.serviceWorker.register('app/static/sw.js', { scope: '/' }).catch(function() {
-            win.navigator.serviceWorker.register('app/static/sw.js').catch(function() {});
-        });
-    }
-
-    // ---- "Uygulamayı Yükle" yüzen buton (Android/Chrome: beforeinstallprompt) ----
-    if (!doc.getElementById('pwa-install-btn')) {
-        const btn = doc.createElement('button');
-        btn.id = 'pwa-install-btn';
-        btn.type = 'button';
-        btn.textContent = '📲 Uygulamayı Yükle';
-        btn.style.cssText = `
-            position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(80px);
-            z-index: 999999; display: flex; align-items: center; gap: 8px;
-            padding: 12px 22px; border: none; border-radius: 50px;
-            background: linear-gradient(135deg, #6a3df5 0%, #b84ffb 100%);
-            color: #ffffff; font-family: 'Inter', -apple-system, sans-serif;
-            font-size: 14px; font-weight: 600; cursor: pointer;
-            box-shadow: 0 12px 28px rgba(106, 61, 245, 0.5);
-            opacity: 0; pointer-events: none; transition: opacity 0.25s ease, transform 0.25s ease;
-            padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-        `;
-        doc.body.appendChild(btn);
-
-        let deferredPrompt = null;
-        win.addEventListener('beforeinstallprompt', function(e) {
-            e.preventDefault();
-            deferredPrompt = e;
-            btn.style.opacity = '1';
-            btn.style.pointerEvents = 'auto';
-            btn.style.transform = 'translateX(-50%) translateY(0)';
-        });
-
-        btn.addEventListener('click', function() {
-            if (!deferredPrompt) return;
-            btn.style.opacity = '0';
-            btn.style.pointerEvents = 'none';
-            deferredPrompt.prompt();
-            deferredPrompt.finally && deferredPrompt.finally(function() { deferredPrompt = null; });
-            deferredPrompt = null;
-        });
-
-        win.addEventListener('appinstalled', function() {
-            btn.style.opacity = '0';
-            btn.style.pointerEvents = 'none';
-        });
-    }
-
-    // ---- iOS Safari: manuel "Ana Ekrana Ekle" ipucu (bir kere gösterilir) ----
-    const isIOS = /iphone|ipad|ipod/i.test(win.navigator.userAgent);
-    const isStandalone = win.navigator.standalone === true ||
-        win.matchMedia('(display-mode: standalone)').matches;
-    if (isIOS && !isStandalone && !doc.getElementById('pwa-ios-hint')) {
-        let dismissed = false;
-        try { dismissed = win.localStorage.getItem('otogaleri_ios_hint_dismissed') === '1'; } catch (e) {}
-        if (!dismissed) {
-            const hint = doc.createElement('div');
-            hint.id = 'pwa-ios-hint';
-            hint.style.cssText = `
-                position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 999999;
-                background: #191d33; color: #ffffff; border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 14px; padding: 12px 16px; font-family: 'Inter', -apple-system, sans-serif;
-                font-size: 13px; line-height: 1.4; display: flex; align-items: center; gap: 10px;
-                box-shadow: 0 12px 28px rgba(0,0,0,0.4);
-                padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-            `;
-            hint.innerHTML = `
-                <span style="flex:1;">📲 Uygulama olarak kullanmak için paylaş (⬆️) simgesine, ardından
-                <b>"Ana Ekrana Ekle"</b> seçeneğine dokunun.</span>
-                <button id="pwa-ios-hint-close" style="background:none;border:none;color:#8a8fb8;font-size:18px;cursor:pointer;padding:0 4px;">✕</button>
-            `;
-            doc.body.appendChild(hint);
-            doc.getElementById('pwa-ios-hint-close').addEventListener('click', function() {
-                hint.remove();
-                try { win.localStorage.setItem('otogaleri_ios_hint_dismissed', '1'); } catch (e) {}
-            });
-        }
-    }
-})();
-</script>
-""",
-    height=0,
-    width=0,
-)
-
-# Inject Custom Neo-Fintech Styling
-st.markdown(
-    """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-    :root {
-        --navy: #0f1225;
-        --surface: #191d33;
-        --surface-hover: #22274a;
-        --violet: #6a3df5;
-        --pink: #b84ffb;
-        --green: #2ecc71;
-        --muted: #8a8fb8;
-    }
-
-    /* Global Styles */
-    html, body, .stApp {
-        background-color: var(--navy) !important;
-        color: #ffffff !important;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-
-    .tnum {
-        font-variant-numeric: tabular-nums;
-        font-feature-settings: "tnum" 1;
-        font-weight: 700;
-    }
-
-    /* Remove default streamlit header margin */
-    .block-container {
-        padding-top: 1.5rem !important;
-        padding-left: 0rem !important;
-        padding-right: 0rem !important;
-        padding-bottom: 3rem !important;
-        max-width: 1100px;
-    }
-
-    [data-testid="stHeader"] { background-color: var(--navy) !important; }
-    [data-testid="stSidebar"] { display: none; }
-
-    /* ---------- TOP BAR ---------- */
-    .topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 10% 1.5rem 10%;
-    }
-    .greeting-hello { font-size: 13px; font-weight: 400; color: var(--muted); display: block; }
-    .greeting-name { font-size: 20px; font-weight: 600; color: #ffffff; }
-    .topbar-right { display: flex; align-items: center; gap: 16px; }
-    .sparkline { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
-    .sparkline span {
-        display: block; width: 4px; height: var(--h); border-radius: 2px;
-        background: linear-gradient(180deg, var(--pink) 0%, var(--violet) 100%);
-        opacity: 0.9;
-    }
-    .bell-wrap { position: relative; width: 38px; height: 38px; border-radius: 50%;
-        background: var(--surface); display: flex; align-items: center; justify-content: center; }
-    .notif-dot { position: absolute; top: 7px; right: 8px; width: 8px; height: 8px;
-        border-radius: 50%; background: #ff4d6a; box-shadow: 0 0 0 2px var(--surface); }
-
-    /* ---------- BALANCE ---------- */
-    .balance-block { text-align: center; margin-bottom: 1.75rem; }
-    .balance-label { font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
-    .balance-amount { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
-
-    /* ---------- HERO CARD ---------- */
-    .hero-card-wrap { display: flex; justify-content: center; margin-bottom: 2rem; }
-    .hero-card {
-        width: 200px; height: 126px; border-radius: 14px; padding: 16px;
-        background: linear-gradient(135deg, var(--violet) 0%, var(--pink) 100%);
-        box-shadow: 0 18px 34px rgba(106, 61, 245, 0.45);
-        transform: rotate(-6deg);
-        display: flex; flex-direction: column; justify-content: space-between;
-    }
-    .hero-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
-    .chip { width: 26px; height: 20px; border-radius: 4px; background: linear-gradient(135deg, #ffe9a8, #d8b45c); }
-    .hero-card-brand { font-size: 14px; font-weight: 700; letter-spacing: 1.5px; color: #ffffff; }
-    .hero-card-number { font-size: 15px; font-weight: 600; letter-spacing: 1.5px; color: rgba(255,255,255,0.95); }
-
-    /* ---------- QUICK ACTIONS ---------- */
-    .qa-label {
-        text-align: center; font-size: 12.5px; font-weight: 500; color: #c7cae3;
-        margin-top: 6px; display: block;
-    }
-    div[data-testid="stColumn"] .qa-btn button {
-        width: 52px !important; height: 52px !important; border-radius: 50% !important;
-        background: var(--surface) !important; border: none !important;
-        font-size: 19px !important; display: flex !important; align-items: center; justify-content: center;
-        margin: 0 auto !important; padding: 0 !important;
-    }
-    div[data-testid="stColumn"] .qa-btn button:hover { background: var(--surface-hover) !important; }
-    div[data-testid="stColumn"] .qa-btn button:disabled { opacity: 0.35 !important; }
-    .qa-anchor {
-        width: 52px; height: 52px; border-radius: 50%; background: var(--surface);
-        display: flex; align-items: center; justify-content: center; font-size: 19px;
-        margin: 0 auto; text-decoration: none;
-    }
-    .qa-anchor:hover { background: var(--surface-hover); }
-
-    /* ---------- TODAY / SON BULUNANLAR LIST ---------- */
-    .today-title { font-size: 17px; font-weight: 600; margin: 0.5rem 0 1rem 0; color: #ffffff; }
-    .tx-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .tx-emoji { width: 40px; height: 40px; min-width: 40px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center; font-size: 18px; }
-    .tx-info { display: flex; flex-direction: column; flex: 1; line-height: 1.35; min-width: 0; }
-    .tx-name { font-size: 14.5px; font-weight: 500; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tx-time { font-size: 12.5px; font-weight: 400; color: var(--muted); }
-    .tx-amount { font-size: 15px; font-weight: 700; color: #ffffff; white-space: nowrap; }
-    .tx-amount.income { color: var(--green); }
-    .tx-row.upcoming { opacity: 0.45; }
-
-    /* ---------- BUTTONS ---------- */
-    div.stButton > button {
-        border-radius: 50px !important;
-        padding: 0.6rem 1.6rem !important;
-        font-weight: 600 !important;
-        background-color: var(--surface) !important;
-        color: #ffffff !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        transition: all 0.2s ease;
-    }
-    div.stButton > button:hover { border-color: var(--pink) !important; color: var(--pink) !important; }
-
-    .primary-btn div.stButton > button {
-        background: linear-gradient(135deg, var(--violet) 0%, var(--pink) 100%) !important;
-        color: #ffffff !important; border: none !important;
-    }
-    .primary-btn div.stButton > button:hover { filter: brightness(1.08); }
-
-    /* ---------- PARAMETER CARD ---------- */
-    .parameter-card {
-        background-color: var(--surface);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 16px;
-        padding: 2rem;
-        margin: 0 10%;
-    }
-    .parameter-header { font-size: 18px; font-weight: 600; color: #ffffff; margin-bottom: 1.5rem;
-        border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; }
-
-    /* Streamlit input widgets -> dark surfaces */
-    .stTextInput input, .stNumberInput input, div[data-baseweb="select"] > div, .stMultiSelect div[data-baseweb="select"] > div {
-        background-color: var(--navy) !important;
-        color: #ffffff !important;
-        border-color: rgba(255,255,255,0.1) !important;
-    }
-    label, .stMarkdown p { color: #c7cae3 !important; }
-    h1, h2, h3, h4 { color: #ffffff !important; }
-
-    .new-listing {
-        background: var(--navy);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 10px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-    }
-    .new-listing b { color: #ffffff; }
-
-    /* ---------- FİLTRE PANELİ (st.expander) ---------- */
-    div[data-testid="stExpander"] {
-        background-color: var(--navy) !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        border-radius: 12px !important;
-        margin-bottom: 1.5rem;
-    }
-    div[data-testid="stExpander"] summary {
-        color: #ffffff !important;
-        font-weight: 600 !important;
-        font-size: 14.5px !important;
-        padding: 0.9rem 1rem !important;
-    }
-    div[data-testid="stExpander"] summary:hover { color: var(--pink) !important; }
-    div[data-testid="stExpander"] svg { fill: var(--muted) !important; }
-    div[data-testid="stExpanderDetails"] { padding: 0.25rem 1rem 1rem 1rem !important; }
-
-    /* ---------- QUICK ACTIONS: dar ekranlarda da yatay kalsın ---------- */
-    .st-key-quick_actions div[data-testid="stHorizontalBlock"] {
-        flex-wrap: nowrap !important;
-        gap: 8px !important;
-    }
-    .st-key-quick_actions div[data-testid="stColumn"] {
-        min-width: 0 !important;
-        width: auto !important;
-        flex: 1 1 0 !important;
-    }
-
-    /* ---------- Genel mobil ayarları ---------- */
-    @media (max-width: 480px) {
-        .topbar { padding: 0 6% 1.5rem 6%; }
-        .parameter-card { margin: 0 6%; padding: 1.5rem 1.25rem; }
-        div[style*="padding: 0 10%"] { padding: 0 6% !important; }
-        .balance-amount { font-size: 28px; }
-    }
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-engine = get_engine()
-if engine:
-    init_tables(engine)
-
-if "scan_active" not in st.session_state:
-    st.session_state.scan_active = False
-if "stop_event" not in st.session_state:
-    st.session_state.stop_event = None
-
-df = load_data(engine)
-new_listings_df = df[df["is_new_listing"] == 1] if not df.empty else df
-total_value = df["price"].sum() if not df.empty else 0
-
-# ==========================================================================
-#  TOP BAR: GREETING + NOTIFICATION DOT + SPARKLINE
-# ==========================================================================
-
-hour = datetime.now().hour
-greeting_word = "Günaydın" if hour < 12 else ("İyi günler" if hour < 18 else "İyi akşamlar")
-
-if not df.empty:
-    site_counts = df["source_site"].value_counts()
-    bar_heights = [
-        min(100, max(20, int(v / site_counts.max() * 100))) for v in site_counts.tolist()[:7]
-    ]
-else:
-    bar_heights = [30, 45, 35, 60, 40, 70, 55]
-sparkline_html = "".join(f'<span style="--h:{h}%"></span>' for h in bar_heights)
-
-notif_dot_html = '<span class="notif-dot"></span>' if len(new_listings_df) > 0 else ""
-
-st.markdown(
-    f"""
-<div class="topbar">
-    <div>
-        <span class="greeting-hello">{greeting_word}</span>
-        <span class="greeting-name">Avcı Botu 🎯</span>
-    </div>
-    <div class="topbar-right">
-        <div class="sparkline">{sparkline_html}</div>
-        <div class="bell-wrap">🔔{notif_dot_html}</div>
-    </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="OtoGaleri Avcı Botu", page_icon="🎯", layout="wide")
+st.markdown(CSS, unsafe_allow_html=True)
+inject_pwa()
 
 
 # ==========================================================================
-#  BALANCE: TOPLAM TESPİT EDİLEN DEĞER
+#  ÇALIŞMA ZAMANI (süreç başına tek örnek — tüm oturumlar paylaşır)
 # ==========================================================================
 
-st.markdown(
-    f"""
-<div class="balance-block">
-    <p class="balance-label">Toplam Tespit Edilen Değer</p>
-    <h1 class="balance-amount tnum">₺{format_try(total_value)}</h1>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+
+@st.cache_resource(show_spinner="Veritabanına bağlanılıyor...")
+def runtime() -> tuple[Repository, ScanManager]:
+    settings = get_settings()
+    configure_logging(settings)
+    engine = create_db_engine(settings)
+    init_db(engine)
+    repo = Repository(engine)
+    manager = ScanManager(repo, settings)
+    if settings.embedded_worker:
+        manager.ensure_worker()
+    return repo, manager
 
 
-# ==========================================================================
-#  HERO CARD (TILTED BRAND CARD)
-# ==========================================================================
-
-st.markdown(
-    f"""
-<div class="hero-card-wrap">
-    <div class="hero-card">
-        <div class="hero-card-top">
-            <div class="chip"></div>
-            <span class="hero-card-brand">OTOGALERİ</span>
-        </div>
-        <div class="hero-card-number tnum">•••• {st.session_state.display_id}</div>
-    </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# ==========================================================================
-#  QUICK ACTIONS: BAŞLAT / DURDUR / TEMİZLE / YENİLE
-# ==========================================================================
-
-with st.container(key="quick_actions"):
-    qa1, qa2, qa3, qa4 = st.columns(4)
-
-    with qa1:
-        st.markdown(
-            '<a class="qa-anchor" href="#hedef-arac-ozellikleri">▶️</a><span class="qa-label">Başlat</span>',
-            unsafe_allow_html=True,
-        )
-
-    with qa2:
-        st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
-        stop_clicked = st.button("⏹", key="qa_stop", disabled=not st.session_state.scan_active)
-        st.markdown('</div><span class="qa-label">Durdur</span>', unsafe_allow_html=True)
-        if stop_clicked:
-            st.session_state.scan_active = False
-            if st.session_state.stop_event:
-                st.session_state.stop_event.set()
-            st.rerun()
-
-    with qa3:
-        st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
-        clear_clicked = st.button("🧹", key="qa_clear", disabled=df.empty)
-        st.markdown('</div><span class="qa-label">Temizle</span>', unsafe_allow_html=True)
-        if clear_clicked:
-            clear_all(engine)
-            st.rerun()
-
-    with qa4:
-        st.markdown('<div class="qa-btn">', unsafe_allow_html=True)
-        refresh_clicked = st.button("🔄", key="qa_refresh")
-        st.markdown('</div><span class="qa-label">Yenile</span>', unsafe_allow_html=True)
-        if refresh_clicked:
-            st.rerun()
-
-st.markdown("<div style='height: 2.5rem;'></div>", unsafe_allow_html=True)
-
-
-# ==========================================================================
-#  "SON BULUNANLAR" LİSTESİ
-# ==========================================================================
-
-st.markdown('<div style="padding: 0 10%;">', unsafe_allow_html=True)
-st.markdown('<p class="today-title">Son Bulunanlar</p>', unsafe_allow_html=True)
-
-SITE_EMOJI = {
-    "Otoplus": "🚗",
-    "VavaCars": "🚙",
-    "Otokoç 2. El": "🚘",
-    "Arabam.com": "🏎️",
-    "Sahibinden": "🚓",
-}
-SITE_EMOJI_BG = {
-    "Otoplus": "#2a2140",
-    "VavaCars": "#132a2a",
-    "Otokoç 2. El": "#3a2418",
-    "Arabam.com": "#173021",
-    "Sahibinden": "#242742",
-}
-
-if not df.empty:
-    recent = df.sort_values("scraped_at", ascending=False).head(6)
-    for _, row in recent.iterrows():
-        emoji = SITE_EMOJI.get(row["source_site"], "🚘")
-        bg = SITE_EMOJI_BG.get(row["source_site"], "#242742")
-        is_new = row.get("is_new_listing", 0) == 1
-        amount_class = "tx-amount income tnum" if is_new else "tx-amount tnum"
-        sign = "+" if is_new else "-"
-        try:
-            time_str = row["scraped_at"].strftime("%H:%M") if row["scraped_at"] else "--:--"
-        except Exception:
-            time_str = "--:--"
-        st.markdown(
-            f"""
-        <div class="tx-row">
-            <span class="tx-emoji" style="background:{bg}">{emoji}</span>
-            <div class="tx-info">
-                <span class="tx-name">{row['brand']} {row['model']}</span>
-                <span class="tx-time">{row['source_site']} · {time_str}</span>
-            </div>
-            <span class="{amount_class}">{sign}₺{format_try(row['price'])}</span>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
-else:
-    st.markdown(
-        """
-    <div class="tx-row" style="border-bottom:none;">
-        <div class="tx-info">
-            <span class="tx-name">Henüz araç bulunamadı</span>
-        </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
+try:
+    repo, manager = runtime()
+except Exception as exc:  # noqa: BLE001 - kullanıcıya anlaşılır hata göster
+    st.error(
+        "Veritabanına bağlanılamadı. `.env` dosyasındaki `DATABASE_URL` / "
+        "`OTOGALERI_DB_SERVER` ayarlarını kontrol edin (hiçbiri yoksa yerel SQLite kullanılır)."
     )
+    st.exception(exc)
+    st.stop()
 
-if st.session_state.scan_active:
-    upcoming_text = f"Sıradaki tarama ~{SCRAPER_CYCLE_INTERVAL_SEC} saniye içinde"
-else:
-    upcoming_text = "Tarama başlatıldığında burada görünecek"
 
-st.markdown(
-    f"""
-<div class="tx-row upcoming">
-    <span class="tx-emoji" style="background:#242742">⏱️</span>
-    <div class="tx-info">
-        <span class="tx-name">Sıradaki Tarama</span>
-        <span class="tx-time">{upcoming_text}</span>
-    </div>
-</div>
-""",
-    unsafe_allow_html=True,
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.rstrip("Z"))
+
+
+DURATIONS: dict[str, float | None] = {
+    "1 saat": 1,
+    "6 saat": 6,
+    "12 saat": 12,
+    "1 gün": 24,
+    "3 gün": 72,
+    "1 hafta": 168,
+    "Ben durdurana kadar": None,
+}
+INTERVALS: dict[str, int] = {"5 dk": 5, "10 dk": 10, "15 dk": 15, "30 dk": 30, "1 saat": 60}
+
+
+def _remaining(status: dict[str, Any]) -> str:
+    """Aktif tarama için "5 sa 12 dk" / "Süresiz" metni."""
+    if status.get("indefinite"):
+        return "Süresiz"
+    ends = _parse_iso(status.get("ends_at"))
+    if ends is None:
+        return "-"
+    left = int((ends - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
+    if left <= 0:
+        return "Bitiyor"
+    days, rem = divmod(left, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days} gün {hours} sa"
+    if hours:
+        return f"{hours} sa {minutes} dk"
+    return f"{max(minutes, 1)} dk"
+
+
+def _fmt_local(value: datetime | None) -> str:
+    local = to_local(value)
+    return local.strftime("%d.%m %H:%M") if local else "-"
+
+
+# ==========================================================================
+#  ÜST BANT: durum + kanal sağlığı (10 sn'de bir kendini yeniler)
+# ==========================================================================
+
+st.title("🎯 OtoGaleri Avcı Botu")
+st.caption(
+    "Kriterlerinize uyan ikinci el araç ilanlarını Otoplus, Otokoç, Arabam.com, VavaCars ve "
+    "Sahibinden'de "
+    "periyodik olarak tarar; yeni ilan ve fiyat düşüşlerini bildirir."
 )
 
-st.markdown("</div>", unsafe_allow_html=True)
-st.markdown("<div style='height: 2.5rem;'></div>", unsafe_allow_html=True)
 
-
-# ==========================================================================
-#  PARAMETER CARD (THE PARAMETER FORM)
-# ==========================================================================
-
-st.markdown('<div id="hedef-arac-ozellikleri"></div>', unsafe_allow_html=True)
-st.markdown('<div class="parameter-card">', unsafe_allow_html=True)
-
-# Form header
-st.markdown('<div class="parameter-header">🎯 Hedef Araç Özellikleri</div>', unsafe_allow_html=True)
-
-# Grid parameters
-grid_col1, grid_col2 = st.columns(2)
-
-with grid_col1:
-    t_brand = st.selectbox("Marka Seçin", ["Tümü"] + sorted(CAR_CATALOG.keys()))
-with grid_col2:
-    if t_brand == "Tümü":
-        t_model = st.selectbox("Model Seçin", ["Tümü"])
+@st.fragment(run_every=10)
+def status_band() -> None:
+    status = manager.status()
+    active = status.get("active")
+    state = status.get("status")
+    cycles = int(status.get("cycles") or 0)
+    found_total = int(status.get("found_total") or 0)
+    last_new = int(status.get("last_cycle_new") or 0)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    if active:
+        label = {"pending": "⏳ Başlatılıyor", "stop_requested": "⏸ Durduruluyor"}.get(
+            str(state), "🟢 Tarama aktif"
+        )
+        c1.metric("Durum", label)
+        nxt = _parse_iso(status.get("next_cycle_at"))
+        c3.metric(
+            "Tamamlanan tur",
+            cycles,
+            help=f"Sonraki tur: {humanize_delta(nxt) if nxt else 'şu an sürüyor'}",
+        )
+        c4.metric(
+            "Bu taramada bulunan",
+            format_number(found_total),
+            delta=f"+{last_new} son turda" if cycles else None,
+            delta_color="normal" if last_new else "off",
+            help="Tarama başladığından beri kriterlere uyan yeni araç sayısı",
+        )
+        c5.metric("Kalan süre", _remaining(status))
+        if not status.get("worker_alive") and state != "pending":
+            st.warning(
+                "Worker'dan kalp atışı alınamıyor. `python -m otogaleri.worker` çalışıyor mu?"
+            )
     else:
-        t_model = st.selectbox("Model Seçin", ["Tümü"] + sorted(CAR_CATALOG[t_brand]))
+        c1.metric("Durum", "⚪ Beklemede")
+        c3.metric(
+            "Son tarama",
+            {"completed": "Tamamlandı", "stopped": "Durduruldu", "failed": "Hata"}.get(
+                str(state), "-"
+            ),
+        )
+        c4.metric(
+            "O taramada bulunan",
+            format_number(found_total) if status.get("session_id") else "-",
+            help=f"{cycles} turda toplam",
+        )
+        c5.metric("Bitiş", _fmt_local(_parse_iso(status.get("finished_at"))))
+    total, new = repo.count_listings(), repo.count_listings(only_new=True)
+    c2.metric("Kayıtlı ilan", format_number(total), delta=f"{new} yeni" if new else None)
 
-with st.expander("🎚️ Fiyat / Yıl / Kilometre / Tramer Filtreleri", expanded=False):
-    p_col1, p_col2, p_col3 = st.columns(3)
-    with p_col1:
-        t_min_price = st.number_input(
-            "Minimum Fiyat (TL)", value=None, placeholder="Örn: 500000", step=50000
+    if cycles:
+        st.caption(
+            f"🔁 **{cycles}. tur** tamamlandı "
+            f"({_fmt_local(_parse_iso(status.get('last_cycle_at')))}): "
+            f"{format_number(status.get('last_cycle_seen'))} ilan tarandı, "
+            f"{format_number(status.get('last_cycle_matched'))} kriterlere uydu, "
+            f"**{last_new} yeni araç** bulundu · bu taramada toplam **{found_total}** araç."
         )
-        t_max_price = st.number_input(
-            "Maksimum Fiyat (TL)", value=None, placeholder="Limit Yok", step=50000
-        )
-    with p_col2:
-        t_min_year = st.number_input("Minimum Yıl", value=None, placeholder="Örn: 2015", step=1)
-        t_max_year = st.number_input("Maksimum Yıl", value=None, placeholder="Örn: 2024", step=1)
-    with p_col3:
-        t_min_km = st.number_input(
-            "Minimum Kilometre (KM)", value=None, placeholder="Örn: 0", step=10000
-        )
-        t_max_km = st.number_input(
-            "Maksimum Kilometre (KM)", value=None, placeholder="Limit Yok (Örn: 120000)", step=10000
-        )
+        # yeni tur bittiğinde bir kez bildirim balonu göster
+        key = f"{status.get('session_id')}:{cycles}"
+        if active and st.session_state.get("_last_cycle_seen_key") not in (None, key):
+            st.toast(
+                f"{cycles}. tur bitti: {last_new} yeni araç (toplam {found_total}).",
+                icon="🚗" if last_new else "🔁",
+            )
+        st.session_state["_last_cycle_seen_key"] = key
 
-    p_col4, p_col5 = st.columns(2)
-    with p_col4:
-        t_max_tramer = st.number_input(
-            "Maksimum Kabul Edilen Tramer (TL)",
-            value=None,
-            placeholder="Hasarsız (Örn: 15000)",
-            step=5000,
+    runs = repo.latest_site_runs()
+    chips = "".join(
+        site_chip(
+            s,
+            runs.get(s),
+            humanize_delta(runs[s]["finished_at"]) if s in runs else "",
+            ready=site_ready(s),
         )
-    with p_col5:
-        t_duration = st.number_input("Tedarik Süreci Süresi (Saat)", value=24.0, step=1.0)
+        for s in ALL_SITES
+    )
+    st.markdown(chips, unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
-target_sites = st.multiselect("Hedef Kanallar / Siteler", ALL_SITES, default=ALL_SITES)
 
-# Allowed damages config
-st.markdown("<br><b>🚘 İnteraktif Araç Hasar Haritası</b>", unsafe_allow_html=True)
-st.markdown(
-    "<p style='font-size: 13px; color: var(--muted);'>Aşağıdaki şemada araç parçalarına tıklayarak izin verdiğiniz maksimum hasar durumunu seçin (Gri: Orijinal, Mavi: Boyalı, Kırmızı: Değişen).</p>",
-    unsafe_allow_html=True,
-)
+status_band()
+
+tab_scan, tab_list, tab_market = st.tabs(["🔎 Tarama", "🚗 İlanlar", "📈 Piyasa"])
+
+
+# ==========================================================================
+#  TARAMA SEKMESİ
+# ==========================================================================
 
 car_map = components.declare_component("car_map", path="car_map_component")
-car_state = car_map(key="car_map", default=None)
 
-allowed_parts = []
-if car_state:
-    # Map component keys to scraper keys (tek kaynak: config.DAMAGE_PARTS)
-    mapping = {p["id"]: p["scraper_key"] for p in DAMAGE_PARTS if p["scraper_key"]}
-    for js_key, val in car_state.items():
-        if val in ["boyali", "degisen"]:
-            if js_key in mapping:
-                allowed_parts.append(mapping[js_key])
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# Sourcing Control Buttons
-act_col1, act_col2 = st.columns(2)
-
-with act_col1:
-    # We place submit inside a custom class container for primary button style
-    st.markdown('<div class="primary-btn">', unsafe_allow_html=True)
-    submit_btn = st.button("🚀 Tarama ve Tedarik Sürecini Başlat", use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with act_col2:
-    if st.session_state.scan_active:
-        stop_btn = st.button("🛑 Tarama Oturumunu Sonlandır", use_container_width=True)
-        if stop_btn:
-            st.session_state.scan_active = False
-            if st.session_state.stop_event:
-                st.session_state.stop_event.set()
+with tab_scan:
+    current = manager.status()
+    if current.get("active"):
+        crit = current.get("criteria") or {}
+        interval = crit.get("cycle_interval_min") or get_settings().cycle_interval_sec // 60
+        until = (
+            "siz durdurana kadar"
+            if current.get("indefinite")
+            else f"{_fmt_local(_parse_iso(current.get('ends_at')))} tarihine kadar"
+        )
+        model_txt = crit.get("model", "") if crit.get("model") != ANY else ""
+        st.info(
+            f"**Aktif tarama:** {crit.get('brand', ANY)} {model_txt} · "
+            f"{', '.join(crit.get('sites', []))}  \n"
+            f"Her **{interval} dk**'da bir, **{until}** taranıyor (kalan: {_remaining(current)})."
+        )
+        if st.button("⏹ Taramayı durdur", type="primary"):
+            manager.stop()
+            st.toast("Durdurma isteği gönderildi.")
             st.rerun()
     else:
-        st.button(
-            "🛑 Tarama Oturumunu Sonlandır (Devre Dışı)", use_container_width=True, disabled=True
+        st.subheader("Hedef araç")
+        c1, c2 = st.columns(2)
+        brand = c1.selectbox("Marka", [ANY, *sorted(CAR_CATALOG)])
+        model = c2.selectbox(
+            "Model", [ANY, *sorted(CAR_CATALOG.get(brand, []))], disabled=brand == ANY
         )
 
-if submit_btn:
-    try:
-        criteria = ScanCriteria.from_optional(
-            sites=target_sites,
-            brand=t_brand,
-            model=t_model,
-            min_price=t_min_price,
-            max_price=t_max_price,
-            min_year=t_min_year,
-            max_year=t_max_year,
-            min_km=t_min_km,
-            max_km=t_max_km,
-            max_tramer=t_max_tramer,
-            duration_hours=t_duration,
-            allowed_parts=allowed_parts,
+        c1, c2, c3 = st.columns(3)
+        min_price = c1.number_input(
+            "En düşük fiyat (₺)", min_value=0, value=None, step=50_000, placeholder="Sınır yok"
         )
-    except ValidationError as exc:
-        first = exc.errors()[0]
-        st.error(f"Geçersiz kriter: {first.get('msg', exc)}")
-    else:
-        if engine is None:
-            st.error("Veritabanına bağlanılamadı — tarama başlatılamıyor.")
+        max_price = c1.number_input(
+            "En yüksek fiyat (₺)", min_value=0, value=None, step=50_000, placeholder="Sınır yok"
+        )
+        this_year = datetime.now(timezone.utc).year
+        min_year = c2.number_input(
+            "En eski model yılı", 1970, this_year + 1, value=None, placeholder="Sınır yok"
+        )
+        max_year = c2.number_input(
+            "En yeni model yılı", 1970, this_year + 1, value=None, placeholder="Sınır yok"
+        )
+        min_km = c3.number_input(
+            "En düşük km", min_value=0, value=None, step=10_000, placeholder="Sınır yok"
+        )
+        max_km = c3.number_input(
+            "En yüksek km", min_value=0, value=None, step=10_000, placeholder="Sınır yok"
+        )
+
+        max_tramer = st.number_input(
+            "Kabul edilen en yüksek tramer (₺)",
+            min_value=0,
+            value=None,
+            step=5_000,
+            placeholder="Sınır yok",
+            help="Tramer bilgisini yalnızca Arabam.com ve VavaCars veriyor.",
+        )
+
+        site_help = " · ".join(f"**{s.name}**: {s.note}" for s in SITES if s.note)
+        ready_sites = available_sites()
+        sites = st.multiselect(
+            "Taranacak siteler", ready_sites, default=ready_sites, help=site_help
+        )
+
+        st.subheader("Hasar toleransı")
+        st.caption(
+            "Varsayılan: tüm parçalar orijinal olmalı. İzin verdiğiniz parçaları işaretleyin. "
+            "Çizik/ezik gibi kozmetik kusurlar eleme sebebi değildir."
+        )
+        damage_state: dict[str, str] = (
+            car_map(key="car_map", initial=st.session_state.get("car_map_last"), default={}) or {}
+        )
+        st.session_state["car_map_last"] = damage_state
+        include_unknown = st.checkbox(
+            "Hasar bilgisi okunamayan ilanları da göster",
+            value=True,
+            help="Bazı ilanlarda (ör. VavaCars'ta rozetsiz araçlar) parça bazlı ekspertiz verisi yok.",
+        )
+
+        st.subheader("Tarama planı")
+        c1, c2 = st.columns(2)
+        duration_label = (
+            c1.segmented_control(
+                "Ne kadar sürsün?", list(DURATIONS), default="1 gün", key="duration_choice"
+            )
+            or "1 gün"
+        )
+        interval_label = (
+            c2.segmented_control(
+                "Ne sıklıkla taransın?",
+                list(INTERVALS),
+                default="5 dk",
+                key="interval_choice",
+                help="Sık tarama yeni ilanı daha erken yakalar ama sitelere daha çok istek atar.",
+            )
+            or "5 dk"
+        )
+        duration_hours = DURATIONS[duration_label]
+        interval_min = INTERVALS[interval_label]
+        if duration_hours is None:
+            st.caption(f"⏱️ Siz **durdurana kadar** her {interval_min} dakikada bir taranır.")
         else:
-            st.session_state.scan_active = True
-            stop_event = threading.Event()
-            st.session_state.stop_event = stop_event
-
-            t = threading.Thread(
-                target=_run_scan,
-                args=(engine, criteria, stop_event),
-                daemon=True,
+            ends = datetime.now() + timedelta(hours=duration_hours)
+            rounds = max(1, int(duration_hours * 60 // interval_min))
+            st.caption(
+                f"⏱️ **{ends:%d.%m %H:%M}**'e kadar her {interval_min} dakikada bir taranır "
+                f"(yaklaşık {rounds} tur)."
             )
-            add_script_run_ctx(t)
-            t.start()
+
+        if st.button("🚀 Taramayı başlat", type="primary", disabled=not sites):
+            try:
+                criteria = ScanCriteria(
+                    sites=sites,
+                    brand=brand,
+                    model=model if brand != ANY else ANY,
+                    min_price=min_price or 0,
+                    max_price=max_price or 999_999_999,
+                    min_year=min_year or 1970,
+                    max_year=max_year or 2030,
+                    min_km=min_km or 0,
+                    max_km=max_km or 1_000_000,
+                    max_tramer=999_999_999 if max_tramer is None else max_tramer,
+                    duration_hours=duration_hours,
+                    cycle_interval_min=interval_min,
+                    allowed_parts=[
+                        p for p, s in damage_state.items() if s in ("boyali", "degisen")
+                    ],
+                    changed_allowed_parts=[p for p, s in damage_state.items() if s == "degisen"],
+                    include_unknown_damage=include_unknown,
+                )
+                manager.start(criteria)
+            except ValidationError as exc:
+                for err in exc.errors():
+                    st.error(err.get("msg", str(err)))
+            except ScanAlreadyRunningError as exc:
+                st.warning(str(exc))
+            else:
+                st.toast("Tarama başlatıldı. İlk tur birkaç dakika sürebilir.", icon="🚀")
+                st.rerun()
+
+
+# ==========================================================================
+#  İLANLAR SEKMESİ
+# ==========================================================================
+
+
+def _load_rows() -> list[dict[str, Any]]:
+    return annotate(repo.list_listings())
+
+
+DISPLAY_COLS = {
+    "source_site": "Site",
+    "brand": "Marka",
+    "model": "Model",
+    "package_trim": "Paket",
+    "year": "Yıl",
+    "km": "KM",
+    "price": "Fiyat",
+    "deal_pct": "Piyasaya göre",
+    "tramer_fee": "Tramer",
+    "painted_parts": "Boyalı",
+    "changed_parts": "Değişen",
+    "location": "Şehir",
+    "first_seen_at": "İlk görülme",
+    "link": "Link",
+}
+
+with tab_list:
+
+    @st.fragment(run_every=20)
+    def listings_view() -> None:
+        rows = _load_rows()
+        if not rows:
+            st.info("Henüz kayıtlı ilan yok. **Tarama** sekmesinden kriter belirleyip başlatın.")
+            return
+
+        new_rows = [r for r in rows if r["is_new_listing"]][:12]
+        if new_rows:
+            st.subheader(f"🚨 Bu taramada yakalananlar ({sum(r['is_new_listing'] for r in rows)})")
+            cols = st.columns(3)
+            for i, row in enumerate(new_rows):
+                cols[i % 3].markdown(listing_card(row), unsafe_allow_html=True)
+            st.divider()
+
+        df = pd.DataFrame(rows)
+        f1, f2, f3 = st.columns([2, 2, 1])
+        site_filter = f1.multiselect("Site", sorted(df["source_site"].unique()), placeholder="Tümü")
+        query = f2.text_input("Ara (marka, model, paket)", placeholder="ör. egea dizel")
+        only_deals = f3.toggle("Sadece fırsatlar", help="Piyasa medyanının en az %5 altında")
+        if site_filter:
+            df = df[df["source_site"].isin(site_filter)]
+        if query:
+            hay = (
+                df["brand"] + " " + df["model"] + " " + df["package_trim"] + " " + df["title"]
+            ).str.lower()
+            for word in query.lower().split():
+                df = df[hay.str.contains(word, regex=False)]
+        if only_deals:
+            df = df[df["deal_pct"].fillna(-100) >= 5]
+
+        df = df.copy()
+        local_tz = datetime.now().astimezone().tzinfo
+        df["first_seen_at"] = (
+            pd.to_datetime(df["first_seen_at"], utc=True)
+            .dt.tz_convert(local_tz)
+            .dt.tz_localize(None)
+        )
+        st.dataframe(
+            df[list(DISPLAY_COLS)].rename(columns=DISPLAY_COLS),
+            width="stretch",
+            hide_index=True,
+            height=480,
+            column_config={
+                "Link": st.column_config.LinkColumn("Link", display_text="Aç ↗"),
+                "Fiyat": st.column_config.NumberColumn(format="%d ₺"),
+                "Tramer": st.column_config.NumberColumn(format="%d ₺"),
+                "KM": st.column_config.NumberColumn(format="%d"),
+                "Yıl": st.column_config.NumberColumn(format="%d"),
+                "Piyasaya göre": st.column_config.NumberColumn(
+                    format="%.1f %%", help="Pozitif: piyasa medyanının altında (fırsat)"
+                ),
+                "İlk görülme": st.column_config.DatetimeColumn(format="DD.MM.YYYY HH:mm"),
+            },
+        )
+        st.download_button(
+            "⬇️ CSV olarak indir",
+            df[list(DISPLAY_COLS)]
+            .rename(columns=DISPLAY_COLS)
+            .to_csv(index=False)
+            .encode("utf-8-sig"),
+            file_name=f"otogaleri_ilanlar_{datetime.now():%Y%m%d_%H%M}.csv",
+            mime="text/csv",
+        )
+
+        with st.expander("📉 Fiyat geçmişi"):
+            changed = [r for r in rows if r.get("price_changed_at")]
+            options = {
+                r[
+                    "id"
+                ]: f"{r['brand']} {r['model']} {r['year']} · {format_price(r['price'])} ({r['source_site']})"
+                for r in (changed or rows)[:300]
+            }
+            pick = st.selectbox("İlan", list(options), format_func=options.__getitem__)
+            if pick is not None:
+                hist = pd.DataFrame(repo.get_price_history(pick))
+                if len(hist) > 1:
+                    st.line_chart(hist.set_index("observed_at")["price"])
+                else:
+                    st.caption("Bu ilan için henüz fiyat değişikliği gözlenmedi.")
+
+    listings_view()
+
+    with st.popover("🗑️ Tüm ilanları sil"):
+        st.write("Bu işlem kayıtlı tüm ilanları ve fiyat geçmişini **kalıcı olarak** siler.")
+        sure = st.checkbox("Eminim, sil")
+        if st.button("Sil", type="primary", disabled=not sure):
+            deleted = repo.clear_listings()
+            st.toast(f"{deleted} ilan silindi.")
             st.rerun()
 
-st.markdown("</div>", unsafe_allow_html=True)  # End parameter-card
-
 
 # ==========================================================================
-#  RESULTS SECTION
+#  PİYASA SEKMESİ
 # ==========================================================================
 
-st.markdown('<div style="margin: 3rem 10% 0 10%;">', unsafe_allow_html=True)
-
-st.markdown("<h3>📊 Bulunan Araçlar</h3>", unsafe_allow_html=True)
-
-if not df.empty:
-    if not new_listings_df.empty:
-        st.markdown(f"#### 🚨 YENİ YAKALANAN ARAÇLAR ({len(new_listings_df)} ilan)")
-        for _idx, row in new_listings_df.iterrows():
-            badge_color = (
-                "#ff4b4b"
-                if row["source_site"] == "Otoplus"
-                else ("#1e90ff" if row["source_site"] == "VavaCars" else "#ffa500")
+with tab_market:
+    rows = _load_rows()
+    if not rows:
+        st.info("Grafikler için önce ilan toplanmalı.")
+    else:
+        df = pd.DataFrame(rows)
+        st.caption(
+            "Değerler botun kaydettiği (kriterlerinize uyan) ilanlardan hesaplanır; tüm piyasayı değil, "
+            "takip ettiğiniz segmenti yansıtır."
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Siteye göre ilan sayısı**")
+            st.bar_chart(
+                df["source_site"].value_counts(), horizontal=True, y_label="", x_label="İlan"
             )
-            st.markdown(
-                f"""
-            <div class="new-listing">
-                <span style="background:{badge_color}; color:#ffffff; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; margin-right:10px;">{row['source_site']}</span>
-                <b>{row['brand']} {row['model']} {row['package_trim']}</b> ({row['year']} | {row['km']} km) -
-                <span class="tnum" style="color: var(--green); font-size:18px;">₺{format_try(row['price'])}</span>
-                <br>
-                <small style="color: var(--muted);">Boya: {row['painted_parts']} | Değişen: {row['changed_parts']} | Tramer: {row['tramer_fee']} ₺</small>
-                <br>
-                <a href="{row['link']}" target="_blank" style="color:var(--pink); font-size:12px; font-weight: 500;">İlana Git ↗</a>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
-        st.divider()
+        with c2:
+            st.markdown("**Markaya göre medyan fiyat (₺)**")
+            med = df[df["price"] > 0].groupby("brand")["price"].median().sort_values().tail(15)
+            st.bar_chart(med, horizontal=True, y_label="", x_label="Medyan fiyat")
+        st.markdown("**Kilometre – fiyat dağılımı**")
+        st.scatter_chart(df[df["price"] > 0], x="km", y="price", color="source_site", height=380)
 
-    st.markdown(f"#### 📋 Tüm Kayıtlı Araçlar ({len(df)} toplam ilan)")
+        st.markdown("**En iyi 10 fırsat** (aynı marka/model/yıl medyanına göre)")
+        deals = df.dropna(subset=["deal_pct"]).sort_values("deal_pct", ascending=False).head(10)
+        if deals.empty:
+            st.caption("Fırsat skoru için aynı model/yıldan en az 3 ilan gerekiyor.")
+        else:
+            for row in deals.to_dict("records"):
+                st.markdown(listing_card(row), unsafe_allow_html=True)
 
-    show_cols = [
-        "source_site",
-        "brand",
-        "model",
-        "package_trim",
-        "engine_power",
-        "year",
-        "km",
-        "price",
-        "tramer_fee",
-        "painted_parts",
-        "changed_parts",
-        "link",
-        "scraped_at",
-    ]
-    df_show = df[[c for c in show_cols if c in df.columns]].copy()
-
-    st.dataframe(
-        df_show,
-        use_container_width=True,
-        height=500,
-        column_config={
-            "link": st.column_config.LinkColumn("İlan Linki", display_text="İlana Git"),
-            "price": st.column_config.NumberColumn("Fiyat (TL)", format="%d ₺"),
-            "tramer_fee": st.column_config.NumberColumn("Tramer (TL)", format="%d ₺"),
-        },
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🗑️ Tüm Veritabanını Temizle (Bulunan Araçları Sil)"):
-        clear_all(engine)
-        st.success("Tüm araç verileri başarıyla silindi.")
-        st.rerun()
-else:
-    st.info(
-        "Henüz sistemde eşleşen bir araç bulunamadı. Lütfen hedeflerinizi belirleyip taramayı başlatın."
-    )
-
-st.markdown("</div>", unsafe_allow_html=True)
+st.caption(
+    f"v{__version__} · "
+    "Bu araç yalnızca herkese açık ilan sayfalarını okur; hedef sitelerin kullanım şartlarına "
+    "uymak kullanıcının sorumluluğundadır."
+)

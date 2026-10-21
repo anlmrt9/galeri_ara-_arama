@@ -1,8 +1,6 @@
 # ---- Python ----
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 *.egg-info/
 .eggs/
 dist/
@@ -11,42 +9,48 @@ build/
 venv/
 env/
 
-# ---- Test & tooling caches ----
+# ---- Test & araç önbellekleri ----
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
 
-# ---- Secrets & local config ----
+# ---- Gizli bilgiler & yerel yapılandırma ----
 .env
-.env.local
+.env.*
+!.env.example
 .streamlit/secrets.toml
 
-# ---- Databases ----
+# ---- Veritabanları ----
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
-# ---- Logs ----
+# ---- Loglar ----
 *.log
-otogaleri_log.txt
+*.log.*
+*_log.txt
+*_log.txt.*
 logs/
 
-# ---- Scraper runtime artifacts ----
-downloaded_files/*
-!downloaded_files/.gitkeep
-vava_screenshot.png
+# ---- Scraper çalışma zamanı artıkları ----
+downloaded_files/
+latest_logs/
 *_screenshot.png
 vavacars.html
 main_page.html
-latest_logs/
-downloaded_files/*.lock
 
-# ---- Node (mobile app lives in a sibling repo now) ----
+# ---- Eski sürümden kalan, kimlik bilgisi içerebilecek betikler ----
+test_system.py
+
+# ---- Node (mobil uygulama ayrı depoda) ----
 node_modules/
 
-# ---- OS / editor ----
+# ---- OS / editör ----
 .DS_Store
 Thumbs.db
 .idea/

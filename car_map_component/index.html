@@ -1,155 +1,139 @@
 <!DOCTYPE html>
-<html>
+<html lang="tr" translate="no">
 <head>
   <meta charset="utf-8">
+  <meta name="google" content="notranslate">
+  <title>Hasar toleransı</title>
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 15px; display: flex; justify-content: center; background: transparent; }
-    .car-container { display: flex; align-items: center; gap: 50px; background-color: #ffffff; padding: 25px 40px; border-radius: 20px; border: 2px dashed #cbd5e1; width: 100%; max-width: 500px; justify-content: center;}
-    .car-grid {
-      display: grid;
-      grid-template-columns: 35px 90px 35px;
-      grid-template-rows: 20px 55px 45px 45px 55px 20px;
-      grid-gap: 5px;
-      position: relative;
+    :root {
+      --bg: #ffffff; --fg: #1f2933; --muted: #6b7280; --line: #d6dbe1;
+      --orig: #e8edf2; --orig-fg: #6b7280;
+      --paint: #2563eb; --change: #dc2626; --focus: #f59e0b;
     }
-    .part {
-      background: #cbd5e1; /* Orijinal */
-      border-radius: 4px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: bold;
-      color: #64748b;
-      user-select: none;
-      transition: all 0.2s;
-      border: 2px solid transparent;
+    :root[data-theme="dark"] {
+      --bg: #0e1117; --fg: #e5e7eb; --muted: #9ca3af; --line: #2d333b;
+      --orig: #1f2630; --orig-fg: #9ca3af;
     }
-    .part:hover { opacity: 0.8; }
-    .part.orijinal { background: #e2e8f0; color: #94a3b8; }
-    .part.boyali { background: #3b82f6; color: white; border-color: #2563eb; }
-    .part.degisen { background: #ef4444; color: white; border-color: #dc2626; }
-    
-    #on_tampon { grid-column: 1 / 4; grid-row: 1; border-radius: 12px 12px 4px 4px; }
-    #sol_on_cam { grid-column: 1; grid-row: 2; border-radius: 12px 4px 4px 8px; }
-    #kaput { grid-column: 2; grid-row: 2; border-radius: 8px 8px 4px 4px; }
-    #sag_on_cam { grid-column: 3; grid-row: 2; border-radius: 4px 12px 8px 4px; }
-    
-    #sol_on_kapi { grid-column: 1; grid-row: 3; }
-    #tavan { grid-column: 2; grid-row: 3 / 5; border-radius: 4px; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 4px 0; background: transparent; color: var(--fg);
+           font: 14px/1.4 "Source Sans Pro", -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .wrap { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
+    .car { display: grid; grid-template-columns: 44px 96px 44px;
+           grid-template-rows: 26px 60px 48px 48px 60px 26px; gap: 4px; flex: none; }
+    button.part { border: 1px solid var(--line); border-radius: 6px; background: var(--orig);
+                  color: var(--orig-fg); font: 600 11px/1 inherit; cursor: pointer; padding: 0;
+                  transition: background .15s, color .15s; }
+    button.part:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+    button.part[data-state="boyali"] { background: var(--paint); border-color: var(--paint); color: #fff; }
+    button.part[data-state="degisen"] { background: var(--change); border-color: var(--change); color: #fff; }
+    #on_tampon { grid-column: 1 / 4; grid-row: 1; border-radius: 14px 14px 6px 6px; }
+    #sol_on_cam { grid-column: 1; grid-row: 2; } #kaput { grid-column: 2; grid-row: 2; }
+    #sag_on_cam { grid-column: 3; grid-row: 2; }
+    #sol_on_kapi { grid-column: 1; grid-row: 3; } #tavan { grid-column: 2; grid-row: 3 / 5; }
     #sag_on_kapi { grid-column: 3; grid-row: 3; }
-    
-    #sol_arka_kapi { grid-column: 1; grid-row: 4; }
-    #sag_arka_kapi { grid-column: 3; grid-row: 4; }
-    
-    #sol_arka_cam { grid-column: 1; grid-row: 5; border-radius: 4px 4px 8px 12px; }
-    #bagaj { grid-column: 2; grid-row: 5; border-radius: 4px 4px 12px 12px; }
-    #sag_arka_cam { grid-column: 3; grid-row: 5; border-radius: 4px 4px 12px 8px; }
-    
-    #arka_tampon { grid-column: 1 / 4; grid-row: 6; border-radius: 4px 4px 12px 12px; }
-
-    .legend {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      font-size: 13px;
-      color: #334155;
-    }
-    .legend-item { display: flex; align-items: center; gap: 8px; font-weight: 500;}
-    .box { width: 18px; height: 18px; border-radius: 4px; border: 2px solid transparent;}
-    .box.orijinal { background: #e2e8f0; }
-    .box.boyali { background: #3b82f6; border-color: #2563eb; }
-    .box.degisen { background: #ef4444; border-color: #dc2626;}
+    #sol_arka_kapi { grid-column: 1; grid-row: 4; } #sag_arka_kapi { grid-column: 3; grid-row: 4; }
+    #sol_arka_cam { grid-column: 1; grid-row: 5; } #bagaj { grid-column: 2; grid-row: 5; }
+    #sag_arka_cam { grid-column: 3; grid-row: 5; }
+    #arka_tampon { grid-column: 1 / 4; grid-row: 6; border-radius: 6px 6px 14px 14px; }
+    .side { min-width: 200px; flex: 1; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 10px; padding: 0; list-style: none; }
+    .legend li { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+    .sw { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); }
+    .sw.o { background: var(--orig); } .sw.b { background: var(--paint); } .sw.d { background: var(--change); }
+    .summary { font-size: 13px; color: var(--muted); margin: 6px 0; }
+    .summary b { color: var(--fg); font-weight: 600; }
+    .reset { margin-top: 6px; background: none; border: 1px solid var(--line); color: var(--fg);
+             border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+    .reset:focus-visible { outline: 3px solid var(--focus); }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
   </style>
 </head>
 <body>
-  <div class="car-container">
-    <div class="car-grid">
-      <div id="on_tampon" class="part orijinal">T</div>
-      <div id="sol_on_cam" class="part orijinal">Ç</div>
-      <div id="kaput" class="part orijinal">Kaput</div>
-      <div id="sag_on_cam" class="part orijinal">Ç</div>
-      <div id="sol_on_kapi" class="part orijinal">K</div>
-      <div id="tavan" class="part orijinal">Tavan</div>
-      <div id="sag_on_kapi" class="part orijinal">K</div>
-      <div id="sol_arka_kapi" class="part orijinal">K</div>
-      <div id="sag_arka_kapi" class="part orijinal">K</div>
-      <div id="sol_arka_cam" class="part orijinal">Ç</div>
-      <div id="bagaj" class="part orijinal">Bagaj</div>
-      <div id="sag_arka_cam" class="part orijinal">Ç</div>
-      <div id="arka_tampon" class="part orijinal">T</div>
+  <div class="wrap">
+    <div class="car" role="group" aria-label="Araç parçaları — durum değiştirmek için tıklayın">
+      <button class="part" id="on_tampon" data-label="Ön Tampon">Ön Tampon</button>
+      <button class="part" id="sol_on_cam" data-label="Sol Ön Çamurluk">Ç</button>
+      <button class="part" id="kaput" data-label="Kaput">Kaput</button>
+      <button class="part" id="sag_on_cam" data-label="Sağ Ön Çamurluk">Ç</button>
+      <button class="part" id="sol_on_kapi" data-label="Sol Ön Kapı">K</button>
+      <button class="part" id="tavan" data-label="Tavan">Tavan</button>
+      <button class="part" id="sag_on_kapi" data-label="Sağ Ön Kapı">K</button>
+      <button class="part" id="sol_arka_kapi" data-label="Sol Arka Kapı">K</button>
+      <button class="part" id="sag_arka_kapi" data-label="Sağ Arka Kapı">K</button>
+      <button class="part" id="sol_arka_cam" data-label="Sol Arka Çamurluk">Ç</button>
+      <button class="part" id="bagaj" data-label="Bagaj">Bagaj</button>
+      <button class="part" id="sag_arka_cam" data-label="Sağ Arka Çamurluk">Ç</button>
+      <button class="part" id="arka_tampon" data-label="Arka Tampon">Arka Tampon</button>
     </div>
-    
-    <div class="legend">
-      <div class="legend-item"><div class="box orijinal"></div> Orijinal</div>
-      <div class="legend-item"><div class="box boyali"></div> Boyalı</div>
-      <div class="legend-item"><div class="box degisen"></div> Değişen</div>
-      <p style="color: #64748b; font-size: 11px; max-width: 140px; margin-top: 5px; line-height: 1.4;">
-        Tıklayarak durumu değiştirin
-      </p>
+    <div class="side">
+      <ul class="legend" aria-hidden="true">
+        <li><span class="sw o"></span>Orijinal olmalı</li>
+        <li><span class="sw b"></span>Boya kabul</li>
+        <li><span class="sw d"></span>Değişen kabul</li>
+      </ul>
+      <p class="summary" id="sum-b"></p>
+      <p class="summary" id="sum-d"></p>
+      <button type="button" class="reset" id="reset">Tümünü orijinale sıfırla</button>
+      <p class="hint">Parçaya tıklayın (veya Tab + Enter): Orijinal → Boya kabul → Değişen kabul.</p>
+      <p class="sr-only" id="live" aria-live="polite" style="position:absolute;left:-9999px"></p>
     </div>
   </div>
 
   <script>
-    function sendMessageToStreamlitClient(type, data) {
-      const outData = Object.assign({
-        isStreamlitMessage: true,
-        type: type,
-      }, data);
-      window.parent.postMessage(outData, "*");
+    // Streamlit bileşen protokolü (streamlit-component-lib'in yaptığının aynısı).
+    // Mesaj hedefi "*" protokolün kendisidir; yalnızca hasar seçimi gönderilir.
+    const NEXT = { orijinal: "boyali", boyali: "degisen", degisen: "orijinal" };
+    const NAMES = { orijinal: "orijinal olmalı", boyali: "boya kabul", degisen: "değişen kabul" };
+    const parts = Array.from(document.querySelectorAll("button.part"));
+    const state = Object.fromEntries(parts.map(p => [p.id, "orijinal"]));
+
+    function post(type, data) {
+      window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data), "*");
     }
+    function setHeight() { post("streamlit:setFrameHeight", { height: document.body.scrollHeight + 8 }); }
+    function emit() { post("streamlit:setComponentValue", { value: Object.assign({}, state), dataType: "json" }); }
 
-    function init() {
-      sendMessageToStreamlitClient("streamlit:componentReady", {apiVersion: 1});
-    }
-
-    function setFrameHeight() {
-      sendMessageToStreamlitClient("streamlit:setFrameHeight", {height: document.body.scrollHeight + 30});
-    }
-
-    function sendValue(value) {
-      sendMessageToStreamlitClient("streamlit:setComponentValue", {value: value});
-    }
-
-    window.addEventListener("message", function(event) {
-      if (event.data.type === "streamlit:render") {
-        setFrameHeight();
-      }
-    });
-
-    const state = {
-      kaput: 'orijinal', tavan: 'orijinal', bagaj: 'orijinal',
-      sol_on_cam: 'orijinal', sol_on_kapi: 'orijinal', sol_arka_kapi: 'orijinal', sol_arka_cam: 'orijinal',
-      sag_on_cam: 'orijinal', sag_on_kapi: 'orijinal', sag_arka_kapi: 'orijinal', sag_arka_cam: 'orijinal',
-      on_tampon: 'orijinal', arka_tampon: 'orijinal'
-    };
-
-    const nextState = {
-      'orijinal': 'boyali',
-      'boyali': 'degisen',
-      'degisen': 'orijinal'
-    };
-
-    document.querySelectorAll('.part').forEach(el => {
-      el.addEventListener('click', () => {
-        const id = el.id;
-        const current = state[id];
-        const next = nextState[current];
-        state[id] = next;
-        
-        el.classList.remove('orijinal', 'boyali', 'degisen');
-        el.classList.add(next);
-        
-        sendValue(state);
+    function paint() {
+      const b = [], d = [];
+      parts.forEach(p => {
+        const s = state[p.id];
+        p.dataset.state = s;
+        p.setAttribute("aria-label", `${p.dataset.label}: ${NAMES[s]}`);
+        p.title = `${p.dataset.label}: ${NAMES[s]}`;
+        if (s === "boyali") b.push(p.dataset.label);
+        if (s === "degisen") d.push(p.dataset.label);
       });
+      document.getElementById("sum-b").innerHTML = "<b>Boya kabul:</b> " + (b.join(", ") || "—");
+      document.getElementById("sum-d").innerHTML = "<b>Değişen kabul:</b> " + (d.join(", ") || "—");
+    }
+
+    parts.forEach(p => p.addEventListener("click", () => {
+      state[p.id] = NEXT[state[p.id]];
+      paint(); emit();
+      document.getElementById("live").textContent = `${p.dataset.label}: ${NAMES[state[p.id]]}`;
+    }));
+    document.getElementById("reset").addEventListener("click", () => {
+      Object.keys(state).forEach(k => state[k] = "orijinal");
+      paint(); emit();
     });
 
-    setTimeout(() => {
-        init();
-        setFrameHeight();
-        sendValue(state);
-    }, 100);
+    let restored = false;
+    window.addEventListener("message", (event) => {
+      if (!event.data || event.data.type !== "streamlit:render") return;
+      const args = event.data.args || {};
+      const theme = event.data.theme;
+      if (theme && theme.base) document.documentElement.dataset.theme = theme.base;
+      if (!restored && args.initial && typeof args.initial === "object") {
+        Object.entries(args.initial).forEach(([k, v]) => { if (k in state && v in NEXT) state[k] = v; });
+        restored = true;
+        paint();
+      }
+      setHeight();
+    });
+
+    paint();
+    post("streamlit:componentReady", { apiVersion: 1 });
+    setHeight();
   </script>
 </body>
 </html>

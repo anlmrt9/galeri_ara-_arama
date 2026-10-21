@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -19,17 +26,68 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements-dev.txt
 
-      - name: Ruff (lint)
+      - name: Ruff (lint + güvenlik kuralları)
         run: ruff check .
 
-      - name: Black (format check)
+      - name: Black (format)
         run: black --check .
 
-      - name: Mypy (types)
-        run: mypy scan_service.py config.py
-        continue-on-error: true
+      - name: Mypy (tipler)
+        run: mypy
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
       - name: Pytest
-        run: pytest --cov=. --cov-report=term-missing
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=80
+
+  postgres:
+    # Migration'lar ve repository'nin gerçek PostgreSQL üzerinde de çalıştığını doğrular.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: otogaleri
+          POSTGRES_PASSWORD: otogaleri
+          POSTGRES_DB: otogaleri
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U otogaleri" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Pytest (PostgreSQL)
+        env:
+          OTOGALERI_TEST_DATABASE_URL: postgresql+psycopg2://otogaleri:otogaleri@localhost:5432/otogaleri
+        run: pytest tests/test_repository.py tests/test_worker.py
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker imajı derlenebiliyor mu
+        run: docker build -t otogaleri:ci .

@@ -1,17 +1,35 @@
-# Yerel geliştirme yığını: PostgreSQL + REST API + Streamlit arayüzü.
+# Yerel / tek sunuculuk yığın: PostgreSQL + REST API + Streamlit + ayrı tarama worker'ı
+#
+#   cp .env.example .env        # en azından OTOGALERI_API_KEY ve POSTGRES_PASSWORD'ü değiştirin
 #   docker compose up --build
-# Streamlit:  http://localhost:8501
-# API:        http://localhost:8000/docs
+#
+#   Streamlit:  http://localhost:8501
+#   API docs:   http://localhost:8000/docs
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: postgresql+psycopg2://otogaleri:${POSTGRES_PASSWORD:-otogaleri}@db:5432/otogaleri
+    # Taramayı web süreçleri değil ayrı "worker" servisi yürütür
+    OTOGALERI_EMBEDDED_WORKER: "false"
+  depends_on:
+    db:
+      condition: service_healthy
 
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: otogaleri
-      POSTGRES_PASSWORD: otogaleri
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otogaleri}
       POSTGRES_DB: otogaleri
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -21,29 +39,29 @@ services:
       retries: 10
 
   api:
-    build: .
-    environment:
-      DATABASE_URL: postgresql+psycopg2://otogaleri:otogaleri@db:5432/otogaleri
-      OTOGALERI_API_KEY: ${OTOGALERI_API_KEY:-}
-      OTOGALERI_CORS_ORIGINS: ${OTOGALERI_CORS_ORIGINS:-*}
+    <<: *app
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
 
   web:
-    build: .
+    <<: *app
     command: >
       python -m streamlit run app.py
       --server.address=0.0.0.0 --server.port=8501 --server.headless=true
-    environment:
-      DATABASE_URL: postgresql+psycopg2://otogaleri:otogaleri@db:5432/otogaleri
     ports:
       - "8501:8501"
-    depends_on:
-      db:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "otogaleri.worker"]
+    shm_size: "512m"   # headless Chrome (VavaCars) için
+    healthcheck:
+      disable: true
 
 volumes:
   pgdata:

@@ -1,10 +1,10 @@
 [server]
+# static/ klasörü /app/static/ altında sunulur (PWA manifest, ikonlar, service worker)
 enableStaticServing = true
 
+[browser]
+gatherUsageStats = false
+
 [theme]
-base="dark"
-primaryColor="#b84ffb"
-backgroundColor="#0f1225"
-secondaryBackgroundColor="#191d33"
-textColor="#ffffff"
-font="sans serif"
+# Açık/koyu tema kullanıcının sistem tercihini izler; yalnızca vurgu rengi sabit.
+primaryColor = "#15803d"

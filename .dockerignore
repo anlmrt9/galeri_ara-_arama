@@ -1,0 +1,26 @@
+# Gizli bilgiler ve yerel çalışma artıkları imaja girmesin
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.db
+*.db-*
+*.sqlite*
+*_log.txt
+*.log*
+downloaded_files/
+latest_logs/
+
+# Araç/önbellek
+.git
+.github
+.venv
+venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+tests/

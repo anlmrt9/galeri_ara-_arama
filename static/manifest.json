@@ -10,8 +10,8 @@
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
-  "background_color": "#0f1225",
-  "theme_color": "#0f1225",
+  "background_color": "#ffffff",
+  "theme_color": "#14532d",
   "categories": ["business", "utilities", "shopping"],
   "shortcuts": [
     {
